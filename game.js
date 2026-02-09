@@ -7,6 +7,236 @@
 const GL = window.GameLogic;
 const CONSTANTS = GL.GAME_CONSTANTS;
 
+// ============================================
+// WEB AUDIO - PROCEDURAL SOUND EFFECTS
+// ============================================
+const AudioSystem = (() => {
+    let ctx = null;
+    let masterGain = null;
+    const volume = 0.35;
+
+    function init() {
+        if (ctx) return;
+        try {
+            ctx = new (window.AudioContext || window.webkitAudioContext)();
+            masterGain = ctx.createGain();
+            masterGain.gain.value = volume;
+            masterGain.connect(ctx.destination);
+        } catch (e) { /* Audio unavailable */ }
+    }
+
+    function ensureContext() {
+        if (!ctx) init();
+        if (ctx && ctx.state === 'suspended') ctx.resume();
+        return !!ctx;
+    }
+
+    function noise(duration, volume = 0.3) {
+        if (!ensureContext()) return;
+        const sr = ctx.sampleRate;
+        const len = sr * duration;
+        const buf = ctx.createBuffer(1, len, sr);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * volume;
+        return buf;
+    }
+
+    // Metallic sword clash
+    function playSwordClash() {
+        if (!ensureContext()) return;
+        const t = ctx.currentTime;
+
+        // High-frequency metallic ring
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(1200, t);
+        osc.frequency.exponentialRampToValueAtTime(300, t + 0.15);
+
+        filter.type = 'bandpass';
+        filter.frequency.value = 2000;
+        filter.Q.value = 8;
+
+        gain.gain.setValueAtTime(0.25, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(masterGain);
+        osc.start(t);
+        osc.stop(t + 0.2);
+
+        // Noise burst for impact texture
+        const noiseBuf = noise(0.05, 0.5);
+        const nSrc = ctx.createBufferSource();
+        const nGain = ctx.createGain();
+        nSrc.buffer = noiseBuf;
+        nGain.gain.setValueAtTime(0.3, t);
+        nGain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+        nSrc.connect(nGain);
+        nGain.connect(masterGain);
+        nSrc.start(t);
+    }
+
+    // Parry / deflect - bright metallic ring
+    function playParry() {
+        if (!ensureContext()) return;
+        const t = ctx.currentTime;
+
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(2400, t);
+        osc1.frequency.exponentialRampToValueAtTime(1800, t + 0.3);
+
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(3600, t);
+        osc2.frequency.exponentialRampToValueAtTime(2000, t + 0.4);
+
+        gain.gain.setValueAtTime(0.2, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(masterGain);
+        osc1.start(t); osc1.stop(t + 0.4);
+        osc2.start(t); osc2.stop(t + 0.4);
+    }
+
+    // Flesh hit impact - dull thud
+    function playHit() {
+        if (!ensureContext()) return;
+        const t = ctx.currentTime;
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, t);
+        osc.frequency.exponentialRampToValueAtTime(50, t + 0.12);
+
+        gain.gain.setValueAtTime(0.4, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(t);
+        osc.stop(t + 0.15);
+
+        // Add noise for texture
+        const noiseBuf = noise(0.08, 0.4);
+        const nSrc = ctx.createBufferSource();
+        const nGain = ctx.createGain();
+        nSrc.buffer = noiseBuf;
+        nGain.gain.setValueAtTime(0.25, t);
+        nGain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+        nSrc.connect(nGain);
+        nGain.connect(masterGain);
+        nSrc.start(t);
+    }
+
+    // Dash whoosh - filtered noise sweep
+    function playDash() {
+        if (!ensureContext()) return;
+        const t = ctx.currentTime;
+
+        const noiseBuf = noise(0.25, 0.6);
+        const src = ctx.createBufferSource();
+        const filter = ctx.createBiquadFilter();
+        const gain = ctx.createGain();
+
+        src.buffer = noiseBuf;
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(800, t);
+        filter.frequency.exponentialRampToValueAtTime(200, t + 0.25);
+        filter.Q.value = 3;
+
+        gain.gain.setValueAtTime(0.2, t);
+        gain.gain.linearRampToValueAtTime(0.3, t + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+
+        src.connect(filter);
+        filter.connect(gain);
+        gain.connect(masterGain);
+        src.start(t);
+    }
+
+    // Heal chime - warm ascending tones
+    function playHeal() {
+        if (!ensureContext()) return;
+        const t = ctx.currentTime;
+        const notes = [523, 659, 784]; // C5, E5, G5
+
+        notes.forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            const start = t + i * 0.12;
+            gain.gain.setValueAtTime(0, start);
+            gain.gain.linearRampToValueAtTime(0.15, start + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, start + 0.4);
+            osc.connect(gain);
+            gain.connect(masterGain);
+            osc.start(start);
+            osc.stop(start + 0.4);
+        });
+    }
+
+    // Posture break - heavy crumble
+    function playPostureBreak() {
+        if (!ensureContext()) return;
+        const t = ctx.currentTime;
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(200, t);
+        osc.frequency.exponentialRampToValueAtTime(40, t + 0.3);
+        gain.gain.setValueAtTime(0.3, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(t);
+        osc.stop(t + 0.35);
+
+        const noiseBuf = noise(0.2, 0.5);
+        const nSrc = ctx.createBufferSource();
+        const nGain = ctx.createGain();
+        nSrc.buffer = noiseBuf;
+        nGain.gain.setValueAtTime(0.3, t);
+        nGain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+        nSrc.connect(nGain);
+        nGain.connect(masterGain);
+        nSrc.start(t);
+    }
+
+    // Perilous attack warning - ominous tone
+    function playPerilous() {
+        if (!ensureContext()) return;
+        const t = ctx.currentTime;
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(220, t);
+        osc.frequency.linearRampToValueAtTime(440, t + 0.3);
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(0.25, t + 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(t);
+        osc.stop(t + 0.5);
+    }
+
+    return { init, playSwordClash, playParry, playHit, playDash, playHeal, playPostureBreak, playPerilous };
+})();
+
 /**
  * Three.js Setup
  */
@@ -22,6 +252,11 @@ let shockwaves = [];
 let cameraShake = 0;
 let obstacles = [];
 let hitStopTimer = 0;
+
+// Boss Aura System
+let bossAuraParticles = [];
+let bossAuraTimer = 0;
+const AURA_PARTICLE_GEO = new THREE.SphereGeometry(0.05, 4, 4);
 
 // Shared Geometry for Optimization
 const PARTICLE_GEO = new THREE.BoxGeometry(0.1, 0.1, 0.1);
@@ -61,7 +296,7 @@ let localPlayerId = null;
 let sessionId = null;
 let isHost = false;
 let remotePlayers = {}; // { oderId: { character, lastUpdate, data } }
-letHvsessionRef = null;
+let sessionRef = null;
 let playersRef = null;
 let bossRef = null;
 
@@ -81,32 +316,83 @@ const NetworkManager = {
             firebase.initializeApp(FIREBASE_CONFIG);
             db = firebase.database();
             localPlayerId = 'p_' + Math.random().toString(36).substr(2, 9);
-            console.log('Firebase initialized successfully, player ID:', localPlayerId);
             return Promise.resolve();
         } catch (e) {
-            console.error('Firebase init failed, running in offline mode:', e);
+            console.error('[NetworkManager] Firebase init failed, running in offline mode:', e);
             return Promise.resolve();
         }
     },
 
     async joinOrCreateSession(bossName, mapType, playerName) {
         if (!db) {
-            console.warn('No database connection - playing offline');
+            console.warn('[NetworkManager] No database connection - playing offline');
             return { offline: true };
         }
-        console.log('Joining/creating session:', bossName);
-
         sessionId = bossName.toLowerCase().replace(/[^a-z0-9]/g, '_');
         sessionRef = db.ref(`sessions/${sessionId}`);
         playersRef = sessionRef.child('players');
         bossRef = sessionRef.child('boss');
 
-        const snapshot = await sessionRef.once('value');
-        const sessionData = snapshot.val();
+        const sessionSnapshot = await sessionRef.once('value');
+        const sessionData = sessionSnapshot.val();
 
+        let shouldBeHost = false;
         if (!sessionData || sessionData.state === 'ENDED') {
-            // Create new session as host
+            shouldBeHost = true;
+        } else {
+            // Check if there are any LIVE players in the session
+            const playersSnapshot = await playersRef.once('value');
+            const playersData = playersSnapshot.val();
+
+            if (!playersData) {
+                shouldBeHost = true;
+            } else {
+                // Clean stale players: if a player has no recent state update
+                // and joined more than 30s ago, they're a ghost from a crashed session
+                const now = Date.now();
+                const STALE_THRESHOLD = 30000; // 30 seconds
+                const staleKeys = [];
+
+                for (const [key, pData] of Object.entries(playersData)) {
+                    const joinedAt = pData.joinedAt || 0;
+                    const hasState = pData.state && (pData.state.pos || pData.state.health !== undefined);
+                    const age = now - joinedAt;
+
+                    // Player is stale if they joined a while ago but have no state data,
+                    // or if the session is old (>30s) and no active state
+                    if (age > STALE_THRESHOLD && !hasState) {
+                        staleKeys.push(key);
+                    }
+                }
+
+                // Remove stale players
+                for (const key of staleKeys) {
+                    await playersRef.child(key).remove();
+                    delete playersData[key];
+                }
+
+                const remainingCount = Object.keys(playersData).length - staleKeys.length;
+
+                if (remainingCount <= 0) {
+                    // No live players - take over
+                    shouldBeHost = true;
+                } else {
+                    // There are players, but check if the current host is still among them
+                    const currentHostId = sessionData.hostId;
+                    const hostStillPresent = currentHostId && playersData[currentHostId];
+                    if (!hostStillPresent) {
+                        // Host disconnected without cleanup - we take over
+                        shouldBeHost = true;
+                    }
+                }
+            }
+        }
+
+        if (shouldBeHost) {
             isHost = true;
+            // Clear any leftover players from previous session before setting up fresh
+            await playersRef.remove();
+
             await sessionRef.set({
                 bossName: bossName,
                 mapType: mapType,
@@ -116,7 +402,6 @@ const NetworkManager = {
                 playerCount: 1
             });
         } else {
-            // Join existing session
             isHost = false;
             await sessionRef.update({
                 playerCount: firebase.database.ServerValue.increment(1)
@@ -173,7 +458,6 @@ const NetworkManager = {
     },
 
     onPlayerJoined(playerId, data) {
-        console.log('Player joined:', playerId, data.name);
         const spawnAngle = Math.random() * Math.PI * 2;
         const spawnDist = 6 + Math.random() * 2;
         const spawnPos = new THREE.Vector3(
@@ -208,7 +492,6 @@ const NetworkManager = {
     onPlayerLeft(playerId) {
         const remote = remotePlayers[playerId];
         if (remote) {
-            console.log('Player left:', playerId);
             if (remote.character && remote.character.mesh) {
                 scene.remove(remote.character.mesh);
             }
@@ -293,13 +576,11 @@ const NetworkManager = {
             stunned: boss.stunTimer > 0,
             targetId: boss.currentTargetId || localPlayerId
         };
-
         bossRef.set(state);
     },
 
     applyBossState(data) {
         if (!boss || isHost) return;
-
         // Interpolate position
         boss.mesh.position.lerp(
             new THREE.Vector3(data.pos.x, data.pos.y || 0, data.pos.z),
@@ -412,9 +693,21 @@ function scaleBossForPlayerCount() {
     const playerCount = 1 + Object.keys(remotePlayers).length;
     const stats = GL.scaleBossStats(baseBossHealth, baseBossPosture, playerCount);
 
-    // Scale current HP proportionally
-    const healthRatio = boss.health / boss.maxHealth;
-    const postureRatio = boss.posture / boss.maxPosture;
+    // Defensive: ensure boss.maxHealth and boss.maxPosture are valid numbers
+    if (!Number.isFinite(boss.maxHealth) || boss.maxHealth <= 0) {
+        console.warn('[BossScaling] Invalid boss.maxHealth, using fallback value. Value:', boss.maxHealth);
+        boss.maxHealth = baseBossHealth > 0 ? baseBossHealth : (stats.maxHealth || 300);
+        boss.health = boss.maxHealth;
+    }
+    if (!Number.isFinite(boss.maxPosture) || boss.maxPosture <= 0) {
+        console.warn('[BossScaling] Invalid boss.maxPosture, using fallback value. Value:', boss.maxPosture);
+        boss.maxPosture = baseBossPosture > 0 ? baseBossPosture : (stats.maxPosture || 200);
+        boss.posture = 0;
+    }
+
+    // Scale current HP proportionally, but only if valid
+    const healthRatio = Number.isFinite(boss.health) && Number.isFinite(boss.maxHealth) && boss.maxHealth > 0 ? boss.health / boss.maxHealth : 1;
+    const postureRatio = Number.isFinite(boss.posture) && Number.isFinite(boss.maxPosture) && boss.maxPosture > 0 ? boss.posture / boss.maxPosture : 0;
 
     boss.maxHealth = stats.maxHealth;
     boss.maxPosture = stats.maxPosture;
@@ -422,7 +715,10 @@ function scaleBossForPlayerCount() {
     boss.health = Math.floor(boss.maxHealth * healthRatio);
     boss.posture = Math.floor(boss.maxPosture * postureRatio);
 
-    console.log(`Boss scaled for ${playerCount} players: HP=${boss.maxHealth}, Posture=${boss.maxPosture}`);
+    // Final check: if any value is NaN, set to fallback
+    if (!Number.isFinite(boss.health) || boss.health < 0) boss.health = boss.maxHealth;
+    if (!Number.isFinite(boss.posture) || boss.posture < 0) boss.posture = 0;
+
 }
 
 function selectBossTarget() {
@@ -1157,7 +1453,7 @@ class Character {
         if (this.isAttacking) {
             interpSpeed = this.attackType === 'heavy' ? 8 : 20;
             const duration = GL.getAttackDuration(this.attackType);
-            constczprogress = 1 - (this.attackTimer / duration);
+            const progress = 1 - (this.attackTimer / duration);
 
             if (this.attackType === 'heavy') {
                 if (progress < 0.4) targetRotX = -Math.PI * 1.1;
@@ -1201,8 +1497,42 @@ class Character {
             this.smoothRot(targetRotX, targetRotY, targetRotZ, interpSpeed, dt);
 
         } else {
-            targetRotX = -Math.PI / 20 + Math.sin(Date.now() * 0.003) * 0.05;
-            targetRotY = Math.sin(Date.now() * 0.002) * 0.05;
+            // --- Idle breathing & sway ---
+            const t = Date.now() * 0.001;
+
+            // Breathing: slow body bob
+            const breathCycle = Math.sin(t * 1.8) * 0.03;
+            this.mesh.children.forEach(c => {
+                if (c !== this.armPivot && c.position) {
+                    // Don't touch arm pivot or IK limbs directly
+                }
+            });
+
+            // Boss-specific idle presence
+            if (!this.isPlayer) {
+                // Heavier, slower breathing for bosses
+                const bossBreath = Math.sin(t * 1.2) * 0.04;
+                const bossLean = Math.sin(t * 0.7) * 0.015;
+                this.mesh.rotation.x = bossLean;
+                // Subtle weight shift side to side
+                this.mesh.rotation.z = Math.sin(t * 0.5) * 0.01;
+                // Head tracking micro-movement (menacing)
+                if (this.head) {
+                    this.head.rotation.x = Math.sin(t * 2.5) * 0.03;
+                    this.head.rotation.z = Math.sin(t * 1.3) * 0.02;
+                }
+                // Sword held low and ready with subtle drift
+                targetRotX = -Math.PI / 12 + Math.sin(t * 0.8) * 0.06;
+                targetRotY = Math.sin(t * 0.6) * 0.08;
+            } else {
+                // Player idle: lighter, more alert
+                targetRotX = -Math.PI / 20 + Math.sin(t * 2.0) * 0.04;
+                targetRotY = Math.sin(t * 1.5) * 0.04;
+                if (this.head) {
+                    this.head.rotation.x = Math.sin(t * 3.0) * 0.015;
+                }
+            }
+
             this.smoothRot(targetRotX, targetRotY, targetRotZ, 5, dt);
             this.armPivot.position.set(0, this.bodyHeight / 2 + 1.2, 0.8);
             this.armPivot.position.y = 1.0 + this.bodyHeight / 2 + 0.2;
@@ -1300,6 +1630,7 @@ class Character {
         this.dashCooldown = 0.5;
         this.invulnTimer = 0.2;
         createParticles(this.mesh.position, 10, 0x555555);
+        if (this.isPlayer) AudioSystem.playDash();
     }
 
     startSpecial() {
@@ -1399,6 +1730,7 @@ class Character {
         this.healTimer = 1.0;
         this.estusCharges--;
         this.staminaTimer = CONSTANTS.REGEN_DELAY;
+        if (this.isPlayer) AudioSystem.playHeal();
     }
 
     takeHit(dmg, postureDmg) {
@@ -1418,11 +1750,13 @@ class Character {
         createParticles(this.mesh.position.clone().add(new THREE.Vector3(0, 1, 0)), 15, 0x8a0303);
 
         hitStopTimer = 0.08;
+        AudioSystem.playHit();
 
         if (GL.isPostureBroken(this.posture, this.maxPosture)) {
             this.stunTimer = 1.0;
             this.posture = this.maxPosture;
             createFloatingText("BROKEN", this.mesh.position, '#e6a72e');
+            AudioSystem.playPostureBreak();
         }
         if (this.health <= 0) {
             endGame(this.isPlayer ? false : true);
@@ -1469,10 +1803,16 @@ function startGame() {
     const mapSelect = document.getElementById('mapSelect');
     let mapType = mapSelect.value;
 
+    // Initialize audio on first user interaction
+    AudioSystem.init();
+
     document.getElementById('hudBossName').innerText = bossName;
     document.getElementById('localPlayerName').innerText = playerName;
     document.getElementById('statusText').textContent = 'Connecting...';
     document.getElementById('startBtn').disabled = true;
+
+    // Show loading screen
+    document.getElementById('loadingScreen').classList.remove('hidden');
 
     // Blur any active element
     if (document.activeElement instanceof HTMLElement) {
@@ -1488,11 +1828,16 @@ function startGame() {
             mapType = sessionData.mapType;
         }
 
+        // Hide loading, show game
+        document.getElementById('loadingScreen').classList.add('hidden');
         document.getElementById('menu').classList.add('hidden');
         document.getElementById('hud').style.display = 'block';
         document.getElementById('endScreen').classList.add('hidden');
         document.getElementById('endScreen').classList.remove('show-death', 'death-screen', 'victory-screen');
         document.getElementById('startBtn').disabled = false;
+
+        // Request pointer lock for immersive controls
+        renderer.domElement.requestPointerLock?.();
 
         // Clean up existing characters
         if (player && player.mesh) scene.remove(player.mesh);
@@ -1510,6 +1855,12 @@ function startGame() {
         // Get Boss Configuration using GameLogic
         const bossConfig = GL.getBossConfig(bossName);
 
+        // Show boss archetype in HUD
+        const archetypeEl = document.getElementById('hudBossArchetype');
+        if (archetypeEl) {
+            archetypeEl.innerText = bossConfig.type ? bossConfig.type.charAt(0).toUpperCase() + bossConfig.type.slice(1) : '';
+            archetypeEl.style.color = '#' + new THREE.Color(bossConfig.color || 0xaaaaaa).getHexString();
+        }
         // Determine spawn position based on player count
         const existingPlayers = Object.keys(remotePlayers).length;
         const spawnAngle = existingPlayers * (Math.PI * 2 / 6);
@@ -1524,9 +1875,22 @@ function startGame() {
         player = new Character(true, playerColor, spawnPos);
         boss = new Character(false, bossConfig, new THREE.Vector3(0, 0, -5));
 
+        // Add aura glow light to boss
+        if (bossConfig.aura) {
+            const auraLight = new THREE.PointLight(bossConfig.aura.color, bossConfig.aura.intensity * 0.5, 8);
+            auraLight.position.set(0, 1.5, 0);
+            boss.mesh.add(auraLight);
+            boss.auraLight = auraLight;
+        }
+
         // Store base boss stats for scaling
         baseBossHealth = boss.maxHealth;
         baseBossPosture = boss.maxPosture;
+
+        // Reset aura state
+        bossAuraParticles.forEach(p => { scene.remove(p); p.material.dispose(); });
+        bossAuraParticles = [];
+        bossAuraTimer = 0;
 
         // Scale boss if there are already other players
         scaleBossForPlayerCount();
@@ -1537,12 +1901,10 @@ function startGame() {
         clock.start();
 
         if (isHost) {
-            console.log('You are the HOST - controlling boss AI');
         } else {
-            console.log('You joined as CLIENT - boss state synced from host');
         }
     }).catch(err => {
-        console.error('Failed to start game:', err);
+        console.error('[Game] Failed to start game:', err);
         document.getElementById('statusText').textContent = 'Connection failed - playing offline';
         document.getElementById('startBtn').disabled = false;
 
@@ -1553,10 +1915,32 @@ function startGame() {
 
             createEnvironment(mapType);
             const bossConfig = GL.getBossConfig(bossName);
+
+            // Show boss archetype in HUD (offline)
+            const archetypeEl = document.getElementById('hudBossArchetype');
+            if (archetypeEl) {
+                archetypeEl.innerText = bossConfig.type ? bossConfig.type.charAt(0).toUpperCase() + bossConfig.type.slice(1) : '';
+                archetypeEl.style.color = '#' + new THREE.Color(bossConfig.color || 0xaaaaaa).getHexString();
+            }
+
+            document.getElementById('loadingScreen').classList.add('hidden');
             player = new Character(true, 0xaaaaaa, new THREE.Vector3(0, 0, 5));
             boss = new Character(false, bossConfig, new THREE.Vector3(0, 0, -5));
+
+            // Add aura glow light to boss (offline)
+            if (bossConfig.aura) {
+                const auraLight = new THREE.PointLight(bossConfig.aura.color, bossConfig.aura.intensity * 0.5, 8);
+                auraLight.position.set(0, 1.5, 0);
+                boss.mesh.add(auraLight);
+                boss.auraLight = auraLight;
+            }
+
             baseBossHealth = boss.maxHealth;
             baseBossPosture = boss.maxPosture;
+
+            // Reset aura state for offline
+            bossAuraParticles.forEach(p => { scene.remove(p); p.material.dispose(); });
+            bossAuraParticles = [];
 
             gameState = 'PLAYING';
             clock.start();
@@ -1731,11 +2115,14 @@ function updatePhysics(dt) {
         if (cameraShake < 0.1) cameraShake = 0;
     }
     camera.lookAt(boss.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0)));
+
+    // Boss aura
+    updateBossAura(dt);
 }
 
 function getAvoidanceForce(pos) {
     const force = new THREE.Vector3();
-    constQt detectRange = 2.5;
+    const detectRange = 2.5;
 
     obstacles.forEach(obs => {
         const toMe = new THREE.Vector3().subVectors(pos, obs.pos);
@@ -1758,8 +2145,10 @@ function getAvoidanceForce(pos) {
 }
 
 function updateBossAI(dt) {
-    if (!isHost) return; // Only host controls boss AI
-
+    if (!isHost) {
+        // Only host controls boss AI
+        return;
+    }
     if (boss.stunTimer > 0) {
         boss.block(false);
         return;
@@ -1966,7 +2355,6 @@ function handleAttacks(attacker, defender, dt) {
         if (hit && !attacker.hasHit) {
             attacker.hasHit = true;
             let unblockable = (attacker.specialType === 'Earthshaker' || attacker.specialType === 'Death Lunge');
-
             if (defender.isBlocking && !unblockable) {
                 createSparks(defender.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0)), 5, 0xffffff);
                 defender.posture += 40;
@@ -1984,7 +2372,6 @@ function handleAttacks(attacker, defender, dt) {
 
         // Use GameLogic for hit windows
         if (GL.isInHitWindow(attacker.attackTimer, attacker.attackType) && !attacker.hasHit) {
-
             let hitRegistered = false;
             const defPos = defender.mesh.position;
             const defRadius = defender.bodyRadius + 0.3;
@@ -2001,7 +2388,6 @@ function handleAttacks(attacker, defender, dt) {
 
             if (hitRegistered) {
                 attacker.hasHit = true;
-
                 // Use GameLogic for damage calculation
                 const damageInfo = GL.calculateDamage(attacker.attackType, defender.stunTimer > 0);
                 let damage = damageInfo.damage;
@@ -2033,6 +2419,7 @@ function handleAttacks(attacker, defender, dt) {
                             defender.posture += blockInfo.postureDamage;
                             attacker.posture += blockInfo.attackerPostureDamage;
                             createFloatingText("DEFLECT", defender.mesh.position.clone().add(new THREE.Vector3(0, 2, 0)), '#fff5a6');
+                            AudioSystem.playParry();
                             cameraShake = 0.5;
                             attacker.attackTimer = 0;
                             attacker.actionLockoutTimer = 0.15;
@@ -2040,6 +2427,7 @@ function handleAttacks(attacker, defender, dt) {
                             createSparks(defender.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0)), 5, 0xffffff);
                             defender.posture += blockInfo.postureDamage;
                             defender.health -= blockInfo.healthDamage;
+                            AudioSystem.playSwordClash();
                         }
                     }
                 } else {
@@ -2143,10 +2531,106 @@ function showKanji() {
     const el = document.getElementById('kanji');
     el.style.opacity = 1;
     el.style.transform = "translate(-50%, -50%) scale(1.5)";
+    AudioSystem.playPerilous();
     setTimeout(() => {
         el.style.opacity = 0;
         el.style.transform = "translate(-50%, -50%) scale(1)";
     }, 800);
+}
+
+// ============================================
+// BOSS AURA PARTICLE SYSTEM
+// ============================================
+function updateBossAura(dt) {
+    if (!boss || !boss.config || !boss.config.aura) return;
+
+    const aura = boss.config.aura;
+    bossAuraTimer += dt;
+
+    // Pulse the aura light
+    if (boss.auraLight) {
+        const healthRatio = boss.health / boss.maxHealth;
+        const pulse = Math.sin(Date.now() * 0.003) * 0.3 + 0.7;
+        const intensityBase = healthRatio < 0.3 ? aura.intensity * 2.0 : aura.intensity * 0.5;
+        boss.auraLight.intensity = intensityBase * pulse;
+        if (healthRatio < 0.3) {
+            boss.auraLight.color.setHex(0xff0000);
+        }
+    }
+
+    // Emit new aura particles based on rate (and intensity scales with low health)
+    const healthRatio = boss.health / boss.maxHealth;
+    const intensityMult = healthRatio < 0.3 ? 2.5 : (healthRatio < 0.5 ? 1.6 : 1.0);
+    const emitRate = aura.rate * intensityMult;
+
+    if (bossAuraTimer > (1 / (emitRate * 30))) {
+        bossAuraTimer = 0;
+
+        const color = healthRatio < 0.3 ? 0xff0000 : aura.color;
+        const mat = new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: aura.intensity * 0.8
+        });
+
+        const p = new THREE.Mesh(AURA_PARTICLE_GEO, mat);
+
+        // Spawn around the boss body
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 0.3 + Math.random() * 0.8 * boss.baseScale;
+        p.position.set(
+            boss.mesh.position.x + Math.cos(angle) * radius,
+            0.2 + Math.random() * 2.0 * boss.baseScale,
+            boss.mesh.position.z + Math.sin(angle) * radius
+        );
+
+        const s = aura.size * (0.8 + Math.random() * 0.6);
+        p.scale.set(s * 15, s * 15, s * 15);
+
+        p.userData = {
+            life: 0.8 + Math.random() * 0.6,
+            maxLife: 0.8 + Math.random() * 0.6,
+            vx: Math.cos(angle) * 0.3,
+            vy: 1.0 + Math.random() * 1.5,
+            vz: Math.sin(angle) * 0.3,
+            rotSpeed: (Math.random() - 0.5) * 3
+        };
+
+        scene.add(p);
+        bossAuraParticles.push(p);
+    }
+
+    // Update existing aura particles
+    for (let i = bossAuraParticles.length - 1; i >= 0; i--) {
+        const p = bossAuraParticles[i];
+        const d = p.userData;
+        d.life -= dt;
+
+        p.position.x += d.vx * dt;
+        p.position.y += d.vy * dt;
+        p.position.z += d.vz * dt;
+
+        // Spiral inward slightly
+        const toBoss = new THREE.Vector3(
+            boss.mesh.position.x - p.position.x,
+            0,
+            boss.mesh.position.z - p.position.z
+        );
+        p.position.x += toBoss.x * 0.5 * dt;
+        p.position.z += toBoss.z * 0.5 * dt;
+
+        p.rotation.y += d.rotSpeed * dt;
+
+        const lifeRatio = d.life / d.maxLife;
+        p.material.opacity = lifeRatio * aura.intensity * 0.6;
+        p.scale.multiplyScalar(0.995);
+
+        if (d.life <= 0 || p.scale.x < 0.01) {
+            scene.remove(p);
+            p.material.dispose();
+            bossAuraParticles.splice(i, 1);
+        }
+    }
 }
 
 function animate() {
@@ -2187,6 +2671,7 @@ function animate() {
 
 function endGame(victory) {
     gameState = 'ENDED';
+    document.exitPointerLock?.();
     const endScreen = document.getElementById('endScreen');
     const endText = document.getElementById('endText');
     const bossName = document.getElementById('hudBossName').innerText;
@@ -2235,6 +2720,12 @@ function endGame(victory) {
 
 function resetGame() {
     NetworkManager.cleanup();
+    document.exitPointerLock?.();
+
+    // Clean up boss aura particles
+    bossAuraParticles.forEach(p => { scene.remove(p); p.material.dispose(); });
+    bossAuraParticles = [];
+    bossAuraTimer = 0;
 
     document.getElementById('endScreen').classList.add('hidden');
     document.getElementById('menu').classList.remove('hidden');

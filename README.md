@@ -1,23 +1,31 @@
-# Shadow Duel 3D
+# Hollow Duel
 
-A Souls-like multiplayer 3D combat game built with Three.js and Firebase.
+A 3D souls-like multiplayer combat game — fight procedurally generated bosses with friends in the browser.
 
-![Shadow Duel 3D](https://img.shields.io/badge/Three.js-black?style=flat&logo=three.js)
-![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=flat&logo=firebase&logoColor=black)
-![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat&logo=javascript&logoColor=black)
+Built with **Three.js**, **Firebase Realtime Database**, and **vanilla JavaScript**. No frameworks, no bundlers.
 
-## 🎮 Play Now
+![Three.js](https://img.shields.io/badge/Three.js-r128-black?style=flat&logo=three.js)
+![Firebase](https://img.shields.io/badge/Firebase-Realtime_DB-FFCA28?style=flat&logo=firebase&logoColor=black)
+![JavaScript](https://img.shields.io/badge/Vanilla_JS-ES6+-F7DF1E?style=flat&logo=javascript&logoColor=black)
 
-[**Play the Demo**](https://cgpeterson.github.io/shadow-duel-3d/)
+## Play Now
 
-## Features
+[**Play the Demo →**](https://cgpeterson.github.io/shadow-duel-3d/)
 
-- **Real-time 3D Combat** - Fluid attack, block, and parry mechanics
-- **Boss AI Archetypes** - Four distinct boss types (Agile, Aggressive, Tank, Duelist)
-- **Multiplayer Co-op** - Team up with friends via Firebase Realtime Database
-- **Dynamic Boss Scaling** - Boss difficulty scales with player count
-- **Multiple Maps** - Dark Arena, Snowy Forest, and Green Meadow
-- **Souls-like Mechanics** - Stamina management, posture system, healing flasks
+<!-- Replace with an actual gameplay GIF or screenshot -->
+<!-- ![Hollow Duel Gameplay](./screenshot.gif) -->
+
+## What It Does
+
+Enter a boss name, and the game deterministically generates an opponent from four distinct archetypes — each with unique AI behaviors, combat stats, visual auras, and special attacks. Team up with friends by sharing the same boss name as a session key.
+
+**Core Mechanics:**
+
+- **Posture system** — block and deflect to build posture damage; break their stance for a critical window
+- **Stamina management** — attacks, dashes, and blocks cost stamina; overcommit and you're vulnerable
+- **Parry timing** — a tight deflect window rewards precise play with massive posture damage to the boss
+- **Healing flasks** — limited heals that leave you exposed during the animation
+- **Four boss archetypes** — Agile (fast dodger), Aggressive (relentless attacker), Tank (high defense), Duelist (parry master)
 
 ## Controls
 
@@ -26,69 +34,64 @@ A Souls-like multiplayer 3D combat game built with Three.js and Firebase.
 | Move | WASD | Left Stick |
 | Attack | Left Click | X / RB |
 | Heavy Attack | Hold Left Click | Hold X / RB |
-| Block/Parry | Right Click | LB |
+| Block / Parry | Right Click | LB |
 | Dash | Space | A |
 | Heal | E | Y |
 
-## Tech Stack
-
-- **Three.js** - 3D rendering and scene management
-- **Firebase Realtime Database** - Multiplayer synchronization
-- **Vanilla JavaScript** - No frameworks, pure performance
-
-## Project Structure
+## Architecture
 
 ```
-shadow-duel-3d/
-├── index.html      # Main HTML file
-├── styles.css      # Game UI styles
-├── game.js         # Main game logic, Three.js setup, gameplay
-├── gameLogic.js    # Pure functions for combat calculations (testable)
-├── gameLogic.test.js # Unit tests
-└── package.json    # Dependencies for testing
+hollow-duel/
+├── index.html       # Entry point, HUD layout, loading screen
+├── styles.css       # UI styling (menu, HUD bars, end screens)
+├── game.js          # Game controller — Three.js scene, input, networking, AI, combat
+├── gameLogic.js     # Pure functions — damage calc, stamina, collision, boss configs (UMD)
+└── package.json     # Dev dependencies (Jest, Playwright for testing)
 ```
+
+**Key Design Decisions:**
+
+- **Separation of concerns** — `gameLogic.js` exports pure, testable functions (damage calculation, stamina management, collision detection, boss configuration). `game.js` handles rendering, state, and side effects. The logic module uses UMD for dual browser/Node.js compatibility.
+
+- **Procedural IK animation** — characters use a two-bone IK solver for arms and legs rather than pre-baked animations. This allows dynamic sword swings, walk cycles, and blocking poses to blend naturally based on game state.
+
+- **Threat-based AI targeting** — in multiplayer, the boss evaluates targets using a weighted scoring system (distance, attack state, health, stun status) rather than simple proximity, creating more believable aggro behavior.
+
+- **Host-authoritative networking** — the first player in a session controls boss AI; others receive interpolated state. Stale session detection automatically promotes a new host if the original disconnects uncleanly.
+
+- **Procedural audio** — all sound effects are synthesized at runtime using the Web Audio API (oscillators, noise buffers, filters) — zero audio file dependencies.
+
+- **Boss aura system** — each archetype emits persistent particles in their signature color. Below 30% health, auras shift red and intensify, giving visual read on boss phase.
 
 ## Running Locally
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/cgpeterson/shadow-duel-3d.git
-   cd shadow-duel-3d
-   ```
+```bash
+git clone https://github.com/cgpeterson/shadow-duel-3d.git
+cd shadow-duel-3d
+npx http-server .
+# Open http://localhost:8080
+```
 
-2. Start a local server (required for ES modules):
-   ```bash
-   npx http-server .
-   ```
+## Multiplayer
 
-3. Open `http://localhost:8080` in your browser
+The game uses Firebase Realtime Database. Players sharing the same boss name join the same session automatically. To use your own Firebase project:
 
-## Running Tests
+1. Create a project at [console.firebase.google.com](https://console.firebase.google.com)
+2. Enable Realtime Database
+3. Update `FIREBASE_CONFIG` in `game.js`
+
+## Testing
 
 ```bash
 npm install
-npm test
+npm test          # Unit tests (Jest) + E2E tests (Playwright)
+npm run test:unit # Unit tests only
 ```
-
-## Multiplayer Setup
-
-The game uses Firebase Realtime Database for multiplayer. To use multiplayer:
-
-1. Create a Firebase project at [console.firebase.google.com](https://console.firebase.google.com)
-2. Enable Realtime Database
-3. Update the `FIREBASE_CONFIG` in `game.js` with your credentials
-
-## Architecture Highlights
-
-- **Separation of Concerns** - Game logic separated into testable pure functions
-- **IK Animation System** - Procedural arm and leg animations using inverse kinematics
-- **Smart AI Targeting** - Boss selects targets based on threat scoring
-- **Network Interpolation** - Smooth multiplayer movement with position lerping
 
 ## License
 
-MIT License - Feel free to use this code for learning and personal projects.
+MIT
 
 ---
 
-Built by [Rowan Vale](https://cgpeterson.github.io/BeyondTheVale/) | [Portfolio](https://cgpeterson.github.io/BeyondTheVale/)
+Built by [Rowan Vale](https://cgpeterson.github.io/BeyondTheVale/)

@@ -37,7 +37,7 @@
     // ============================================
 
     function calculateDamage(attackType, isTargetStunned = false) {
-        constWZbaseDamage = attackType === 'heavy' ? 40 : 15;
+        const baseDamage = attackType === 'heavy' ? 40 : 15;
         const basePosture = attackType === 'heavy' ? 60 : 25;
 
         const damageMultiplier = isTargetStunned ? 1.5 : 1.0;
@@ -116,7 +116,8 @@
             speed: 9,
             scale: 1.1,
             ai: { aggro: 0.4, defend: 0.1, dodge: 0.8, strafe: 0.8, heavyChance: 0.2 },
-            specialName: "Phantom Flurry"
+            specialName: "Phantom Flurry",
+            aura: { color: 0x00bcd4, intensity: 0.6, rate: 0.4, size: 0.08 },
         },
         aggressive: {
             type: 'aggressive',
@@ -126,7 +127,8 @@
             speed: 7.5,
             scale: 1.4,
             ai: { aggro: 0.9, defend: 0.05, dodge: 0.1, strafe: 0.1, heavyChance: 0.7 },
-            specialName: "Whirlwind"
+            specialName: "Whirlwind",
+            aura: { color: 0xff3300, intensity: 1.0, rate: 0.6, size: 0.12 },
         },
         tank: {
             type: 'tank',
@@ -136,7 +138,8 @@
             speed: 4,
             scale: 1.5,
             ai: { aggro: 0.3, defend: 0.8, dodge: 0.0, strafe: 0.2, heavyChance: 0.9 },
-            specialName: "Earthshaker"
+            specialName: "Earthshaker",
+            aura: { color: 0x607d8b, intensity: 0.4, rate: 0.2, size: 0.15 },
         },
         duelist: {
             type: 'duelist',
@@ -146,7 +149,8 @@
             speed: 6,
             scale: 1.2,
             ai: { aggro: 0.5, defend: 0.6, dodge: 0.4, strafe: 0.5, heavyChance: 0.4, parryMaster: true },
-            specialName: "Death Lunge"
+            specialName: "Death Lunge",
+            aura: { color: 0x9c27b0, intensity: 0.7, rate: 0.3, size: 0.10 },
         }
     };
 
@@ -169,7 +173,7 @@
     // BOSS SCALING
     // ============================================
 
-    function scaleBossStats(baseHealth, basePosture, ZSplayerCount) {
+    function scaleBossStats(baseHealth, basePosture, playerCount) {
         const healthMultiplier = 1 + (playerCount - 1) * 0.6;
         const postureMultiplier = 1 + (playerCount - 1) * 0.4;
 
