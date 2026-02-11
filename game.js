@@ -306,6 +306,21 @@ let lastSyncTime = 0;
 // Player colors for multiplayer
 const PLAYER_COLORS = [0xaaaaaa, 0x4fc3f7, 0x81c784, 0xffb74d, 0xba68c8, 0xf06292];
 
+// Color picker interaction
+let selectedPlayerColor = 0xaaaaaa;
+document.addEventListener('DOMContentLoaded', () => {
+    const picker = document.getElementById('colorPicker');
+    if (picker) {
+        picker.addEventListener('click', (e) => {
+            const swatch = e.target.closest('.color-swatch');
+            if (!swatch) return;
+            picker.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+            swatch.classList.add('selected');
+            selectedPlayerColor = parseInt(swatch.dataset.color);
+        });
+    }
+});
+
 // ===========================================
 // NETWORK MANAGER
 // ===========================================
@@ -412,7 +427,7 @@ const NetworkManager = {
         const playerRef = playersRef.child(localPlayerId);
         await playerRef.set({
             name: playerName || 'Wolf',
-            color: PLAYER_COLORS[Object.keys(remotePlayers).length % PLAYER_COLORS.length],
+            color: selectedPlayerColor,
             joinedAt: firebase.database.ServerValue.TIMESTAMP,
             state: {}
         });
@@ -1118,54 +1133,139 @@ class Character {
         }
 
         this.baseColor = this.config.color !== undefined ? this.config.color : (isPlayer ? 0xaaaaaa : 0xff0000);
-        this.bodyMat = new THREE.MeshStandardMaterial({ color: this.baseColor });
+
+        // --- Slime Material (translucent, shiny, slight inner glow) ---
+        this.baseOpacity = 0.7;
+        this.baseEmissiveIntensity = 0.08;
+        this.bodyMat = new THREE.MeshStandardMaterial({
+            color: this.baseColor,
+            transparent: true,
+            opacity: this.baseOpacity,
+            metalness: 0.1,
+            roughness: 0.15,
+            emissive: this.baseColor,
+            emissiveIntensity: this.baseEmissiveIntensity,
+            side: THREE.DoubleSide
+        });
 
         this.bodyRadius = 0.5;
-        this.bodyHeight = 0.6;
-
-        const cylGeo = new THREE.CylinderGeometry(this.bodyRadius, this.bodyRadius, this.bodyHeight, 16);
-        const cylinder = new THREE.Mesh(cylGeo, this.bodyMat);
+        this.bodyHeight = 1.2;
         const bodyY = 1.0 + this.bodyHeight / 2;
-        cylinder.position.y = bodyY;
-        cylinder.castShadow = true;
-        this.mesh.add(cylinder);
 
-        const capGeo = new THREE.SphereGeometry(this.bodyRadius, 16, 16);
-        const topCap = new THREE.Mesh(capGeo, this.bodyMat);
-        topCap.position.y = bodyY + this.bodyHeight / 2;
-        this.mesh.add(topCap);
+        // --- Single pear-shaped body (Grimace silhouette via LatheGeometry) ---
+        const profile = [];
+        const bodySegs = 24;
+        for (let i = 0; i <= bodySegs; i++) {
+            const t = i / bodySegs;
+            const y = t * 1.5 - 0.75; // centered: -0.75 to +0.75
+            let r;
+            if (t < 0.05) {
+                r = (t / 0.05) * 0.25;
+            } else if (t < 0.35) {
+                const bt = (t - 0.05) / 0.3;
+                r = 0.25 + Math.sin(bt * Math.PI / 2) * 0.37;
+            } else if (t < 0.75) {
+                const ut = (t - 0.35) / 0.4;
+                r = 0.62 - ut * 0.3;
+            } else {
+                const nt = (t - 0.75) / 0.25;
+                r = 0.32 - nt * 0.2;
+            }
+            profile.push(new THREE.Vector2(r, y));
+        }
+        const bodyGeo = new THREE.LatheGeometry(profile, 20);
+        this.slimeBody = new THREE.Mesh(bodyGeo, this.bodyMat);
+        this.slimeBody.position.y = bodyY;
+        this.slimeBody.castShadow = true;
+        this.mesh.add(this.slimeBody);
+        this.slimeBodyBasePos = new Float32Array(bodyGeo.attributes.position.array);
 
-        const botCap = new THREE.Mesh(capGeo, this.bodyMat);
-        botCap.position.y = bodyY - this.bodyHeight / 2;
-        this.mesh.add(botCap);
+        // Inner glow light
+        const innerGlow = new THREE.PointLight(this.baseColor, 0.55, 3);
+        innerGlow.position.y = bodyY;
+        this.mesh.add(innerGlow);
+        this.innerGlow = innerGlow;
 
-        const headRadius = 0.35;
-        const headGeo = new THREE.SphereGeometry(headRadius, 16, 16);
-        const headMat = new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0x111111 });
-        this.head = new THREE.Mesh(headGeo, headMat);
-        this.head.position.set(0, bodyY + this.bodyHeight / 2 + headRadius + 0.05, 0);
+        // --- Small head on spring (Human Fall Flat style lag) ---
+        this.headRestY = bodyY + 0.72;
+        this.head = new THREE.Group();
+        this.head.position.set(0, this.headRestY, 0);
         this.mesh.add(this.head);
 
-        const eyeGeo = new THREE.BoxGeometry(0.4, 0.1, 0.2);
-        const eyeColor = (!isPlayer && this.config.ai && this.config.ai.aggro > 0.8) ? 0xff0000 : 0x00ffff;
-        const eye = new THREE.Mesh(eyeGeo, new THREE.MeshBasicMaterial({ color: isPlayer ? 0x00ff00 : eyeColor }));
-        eye.position.set(0, 0, 0.25);
-        this.head.add(eye);
+        // Visible small head sphere
+        const headGeo = new THREE.SphereGeometry(0.22, 14, 12);
+        const headMesh = new THREE.Mesh(headGeo, this.bodyMat);
+        headMesh.castShadow = true;
+        this.head.add(headMesh);
 
+        // Neck nub (connects head to body)
+        const neckGeo = new THREE.SphereGeometry(0.13, 10, 8);
+        const neck = new THREE.Mesh(neckGeo, this.bodyMat);
+        neck.position.y = -0.18;
+        neck.scale.set(1.0, 1.4, 1.0);
+        this.head.add(neck);
+
+        // Spring physics state
+        this.headSpringOffset = new THREE.Vector3();
+        this.headSpringVel = new THREE.Vector3();
+
+        // Googly eyes (on the small head)
+        this.pupils = [];
+        const eyeWhiteGeo = new THREE.SphereGeometry(0.12, 12, 12);
+        const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, metalness: 0.0 });
+        const pupilGeo = new THREE.SphereGeometry(0.065, 10, 10);
+        const pupilMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+
+        for (let i = -1; i <= 1; i += 2) {
+            const eyeWhite = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat);
+            eyeWhite.position.set(i * 0.13, 0.04, 0.17);
+            if (i > 0) eyeWhite.scale.setScalar(1.1);
+            this.head.add(eyeWhite);
+
+            const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+            pupil.position.set(0, 0, 0.08);
+            eyeWhite.add(pupil);
+            this.pupils.push(eyeWhite);
+        }
+
+        // Boss: angry brow ridges + crown bumps
+        if (!isPlayer) {
+            const browMat = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(this.baseColor).multiplyScalar(0.45),
+                transparent: true, opacity: 0.85, roughness: 0.3
+            });
+            for (let i = -1; i <= 1; i += 2) {
+                const browGeo = new THREE.BoxGeometry(0.18, 0.05, 0.08);
+                const brow = new THREE.Mesh(browGeo, browMat);
+                brow.position.set(i * 0.13, 0.18, 0.19);
+                brow.rotation.z = i * -0.3;
+                this.head.add(brow);
+            }
+            const bumpGeo = new THREE.SphereGeometry(0.07, 8, 8);
+            const bumpMat = new THREE.MeshStandardMaterial({
+                color: this.baseColor, transparent: true, opacity: 0.8,
+                emissive: this.baseColor, emissiveIntensity: 0.15, roughness: 0.2
+            });
+            for (let i = 0; i < 3; i++) {
+                const bump = new THREE.Mesh(bumpGeo, bumpMat);
+                const angle = (i - 1) * 0.6;
+                bump.position.set(Math.sin(angle) * 0.14, 0.26 + Math.cos(i) * 0.03, Math.cos(angle) * 0.06);
+                this.head.add(bump);
+            }
+        }
+
+        // --- Weapon (sword) ---
         this.armPivot = new THREE.Group();
-        this.armPivot.position.set(0, bodyY + 0.2, 0.8);
+        this.armPivot.position.set(0, bodyY + 0.35, 0.8);
         this.mesh.add(this.armPivot);
 
         this.weaponGroup = new THREE.Group();
         this.armPivot.add(this.weaponGroup);
 
         const swordLen = 3.5;
-        const bladeGeo = new THREE.BoxGeometry(0.15, swordLen, 0.05);
+        const bladeGeo = new THREE.BoxGeometry(0.12, swordLen, 0.04);
         const swordMat = new THREE.MeshStandardMaterial({
-            color: 0xeeeeee,
-            emissive: 0x111111,
-            metalness: 0.9,
-            roughness: 0.2
+            color: 0xdadada, metalness: 0.9, roughness: 0.1, emissive: 0x111111
         });
         this.sword = new THREE.Mesh(bladeGeo, swordMat);
         this.sword.position.y = swordLen / 2;
@@ -1191,6 +1291,7 @@ class Character {
         handle.position.y = -0.3;
         this.weaponGroup.add(handle);
 
+        // Hand targets (IK)
         this.ikJoints = {};
         this.handTargets = { left: new THREE.Object3D(), right: new THREE.Object3D() };
         this.weaponGroup.add(this.handTargets.right);
@@ -1199,8 +1300,8 @@ class Character {
         this.handTargets.left.position.set(0, -0.4, 0);
 
         this.shoulderPos = {
-            left: new THREE.Vector3(-0.55, bodyY + 0.3, 0),
-            right: new THREE.Vector3(0.55, bodyY + 0.3, 0)
+            left: new THREE.Vector3(-0.5, bodyY + 0.35, 0),
+            right: new THREE.Vector3(0.5, bodyY + 0.35, 0)
         };
 
         this.createLimb('left', 'arm');
@@ -1209,8 +1310,8 @@ class Character {
         this.ikJointsLegs = {};
         this.walkTimer = 0;
         this.hipPos = {
-            left: new THREE.Vector3(-0.3, bodyY - this.bodyHeight / 2 - 0.1, 0),
-            right: new THREE.Vector3(0.3, bodyY - this.bodyHeight / 2 - 0.1, 0)
+            left: new THREE.Vector3(-0.25, bodyY - this.bodyHeight / 2 - 0.12, 0),
+            right: new THREE.Vector3(0.25, bodyY - this.bodyHeight / 2 - 0.12, 0)
         };
         this.footTargets = {
             left: new THREE.Vector3(-0.3, 0, 0),
@@ -1258,26 +1359,49 @@ class Character {
     }
 
     createLimb(side, type) {
-        const armMat = new THREE.MeshStandardMaterial({ color: this.config.color || (this.isPlayer ? 0xaaaaaa : 0x800000) });
-        const jointColor = new THREE.Color(armMat.color).multiplyScalar(0.5);
-        const jointMat = new THREE.MeshStandardMaterial({ color: jointColor });
+        const limbMat = new THREE.MeshStandardMaterial({
+            color: this.baseColor,
+            transparent: true,
+            opacity: this.baseOpacity * 0.88,
+            metalness: 0.1,
+            roughness: 0.2,
+            emissive: this.baseColor,
+            emissiveIntensity: 0.05
+        });
+        const jointMat = new THREE.MeshStandardMaterial({
+            color: this.baseColor,
+            transparent: true,
+            opacity: this.baseOpacity,
+            metalness: 0.1,
+            roughness: 0.25,
+            emissive: this.baseColor,
+            emissiveIntensity: 0.06
+        });
 
         const isLeg = type === 'leg';
         const len = isLeg ? 0.55 : 0.6;
         const rad = isLeg ? 0.15 : 0.12;
 
-        const upperGeo = new THREE.CylinderGeometry(rad, rad * 0.8, len, 8);
+        // Blobby capsule-like segments
+        const upperGeo = new THREE.CylinderGeometry(rad, rad * 0.9, len, 10);
         upperGeo.rotateX(-Math.PI / 2);
         upperGeo.translate(0, 0, len / 2);
 
-        const lowerGeo = new THREE.CylinderGeometry(rad * 0.8, rad * 0.6, len, 8);
+        const lowerGeo = new THREE.CylinderGeometry(rad * 0.9, rad * 0.7, len, 10);
         lowerGeo.rotateX(-Math.PI / 2);
         lowerGeo.translate(0, 0, len / 2);
 
-        const upper = new THREE.Mesh(upperGeo, armMat);
-        const lower = new THREE.Mesh(lowerGeo, armMat);
-        const joint = new THREE.Mesh(new THREE.SphereGeometry(rad * 0.9), jointMat);
-        const root = new THREE.Mesh(new THREE.SphereGeometry(rad * 1.1), jointMat);
+        const upper = new THREE.Mesh(upperGeo, limbMat);
+        const lower = new THREE.Mesh(lowerGeo, limbMat);
+
+        const joint = new THREE.Mesh(new THREE.SphereGeometry(rad * 1.0), jointMat);
+        const root = new THREE.Mesh(new THREE.SphereGeometry(rad * 1.2), jointMat);
+
+        // Blobby cap at the end of lower limb
+        const capGeo = new THREE.SphereGeometry(rad * 0.8, 8, 8);
+        const endCap = new THREE.Mesh(capGeo, jointMat);
+        endCap.position.z = len;
+        lower.add(endCap);
 
         this.mesh.add(root);
         this.mesh.add(upper);
@@ -1307,15 +1431,21 @@ class Character {
             this.invulnTimer -= dt;
             this.mesh.traverse(c => {
                 if (c.isMesh && c.material) {
+                    if (c.material._origOpacity === undefined) {
+                        c.material._origOpacity = c.material.opacity;
+                        c.material._origTransparent = c.material.transparent;
+                    }
                     c.material.transparent = true;
-                    c.material.opacity = 0.5;
+                    c.material.opacity = c.material._origOpacity * 0.35;
                 }
             });
         } else {
             this.mesh.traverse(c => {
-                if (c.isMesh && c.material) {
-                    c.material.transparent = false;
-                    c.material.opacity = 1.0;
+                if (c.isMesh && c.material && c.material._origOpacity !== undefined) {
+                    c.material.opacity = c.material._origOpacity;
+                    c.material.transparent = c.material._origTransparent;
+                    delete c.material._origOpacity;
+                    delete c.material._origTransparent;
                 }
             });
         }
@@ -1348,8 +1478,8 @@ class Character {
             this.wasLockedOut = false;
             this.mesh.scale.setScalar(this.baseScale);
             this.bodyMat.color.setHex(this.baseColor);
-            this.bodyMat.emissive.setHex(0x000000);
-            this.bodyMat.emissiveIntensity = 0;
+            this.bodyMat.emissive.setHex(this.baseColor);
+            this.bodyMat.emissiveIntensity = this.baseEmissiveIntensity;
         }
 
         // Stamina Regen using GameLogic
@@ -1531,11 +1661,6 @@ class Character {
                 this.mesh.rotation.x = bossLean;
                 // Subtle weight shift side to side
                 this.mesh.rotation.z = Math.sin(t * 0.5) * 0.01;
-                // Head tracking micro-movement (menacing)
-                if (this.head) {
-                    this.head.rotation.x = Math.sin(t * 2.5) * 0.03;
-                    this.head.rotation.z = Math.sin(t * 1.3) * 0.02;
-                }
                 // Sword held low and ready with subtle drift
                 targetRotX = -Math.PI / 12 + Math.sin(t * 0.8) * 0.06;
                 targetRotY = Math.sin(t * 0.6) * 0.08;
@@ -1543,14 +1668,11 @@ class Character {
                 // Player idle: lighter, more alert
                 targetRotX = -Math.PI / 20 + Math.sin(t * 2.0) * 0.04;
                 targetRotY = Math.sin(t * 1.5) * 0.04;
-                if (this.head) {
-                    this.head.rotation.x = Math.sin(t * 3.0) * 0.015;
-                }
             }
 
             this.smoothRot(targetRotX, targetRotY, targetRotZ, 5, dt);
             this.armPivot.position.set(0, this.bodyHeight / 2 + 1.2, 0.8);
-            this.armPivot.position.y = 1.0 + this.bodyHeight / 2 + 0.2;
+            this.armPivot.position.y = 1.0 + this.bodyHeight / 2 + 0.35;
         }
 
         this.mesh.position.add(this.velocity.clone().multiplyScalar(dt));
@@ -1561,6 +1683,65 @@ class Character {
         this.lastPos.copy(currentPos);
 
         const speed = delta.length() / dt;
+
+        // Head spring physics (Human Fall Flat style lag)
+        if (this.head && this.headSpringVel) {
+            const localMoveDelta = delta.clone().applyQuaternion(this.mesh.quaternion.clone().invert());
+
+            // Body movement creates inertia (head lags behind)
+            const inertia = 15;
+            this.headSpringVel.x -= localMoveDelta.x * inertia;
+            this.headSpringVel.z -= localMoveDelta.z * inertia;
+            this.headSpringVel.y -= localMoveDelta.y * inertia * 0.5;
+
+            // Subtle idle wander so head bobs even when standing still
+            const t2 = Date.now() * 0.001;
+            this.headSpringVel.x += Math.sin(t2 * 1.3) * 0.3 * dt;
+            this.headSpringVel.y += Math.sin(t2 * 2.5) * 0.2 * dt;
+
+            // Spring restoration: F = -kx - dv
+            const stiffness = 35;
+            const damping = 8;
+            this.headSpringVel.x += (-stiffness * this.headSpringOffset.x - damping * this.headSpringVel.x) * dt;
+            this.headSpringVel.z += (-stiffness * this.headSpringOffset.z - damping * this.headSpringVel.z) * dt;
+            this.headSpringVel.y += (-stiffness * this.headSpringOffset.y - damping * this.headSpringVel.y) * dt;
+
+            // Integrate
+            this.headSpringOffset.add(this.headSpringVel.clone().multiplyScalar(dt));
+
+            // Clamp max offset
+            if (this.headSpringOffset.length() > 0.35) {
+                this.headSpringOffset.setLength(0.35);
+            }
+
+            // Apply position (offset from rest position)
+            this.head.position.set(
+                this.headSpringOffset.x,
+                this.headRestY + this.headSpringOffset.y,
+                this.headSpringOffset.z
+            );
+
+            // Head tilts — top of head falls behind (opposite to movement)
+            this.head.rotation.z = -this.headSpringOffset.x * 2.5;
+            this.head.rotation.x = this.headSpringOffset.z * 2.0;
+
+            // Curve the body like a tree in wind (vertex deformation)
+            if (this.slimeBody && this.slimeBodyBasePos) {
+                const positions = this.slimeBody.geometry.attributes.position;
+                const base = this.slimeBodyBasePos;
+                for (let vi = 0; vi < positions.count; vi++) {
+                    const idx = vi * 3;
+                    const baseY = base[idx + 1];
+                    // Height: 0 at bottom (-0.75), 1 at top (+0.75)
+                    const h = Math.max(0, (baseY + 0.75) / 1.5);
+                    const curve = h * h; // quadratic — more bend at top
+                    positions.array[idx] = base[idx] + this.headSpringOffset.x * curve * 0.85;
+                    positions.array[idx + 2] = base[idx + 2] + this.headSpringOffset.z * curve * 0.85;
+                }
+                positions.needsUpdate = true;
+                this.slimeBody.geometry.computeVertexNormals();
+            }
+        }
 
         if (speed > 0.5) {
             this.walkTimer += dt * speed * 2;
@@ -1582,6 +1763,29 @@ class Character {
         } else {
             this.footTargets.left.lerp(new THREE.Vector3(-0.3, 0, 0.2), 0.1);
             this.footTargets.right.lerp(new THREE.Vector3(0.3, 0, -0.2), 0.1);
+        }
+
+        // Slime jiggle — squash and stretch the pear body
+        if (this.slimeBody) {
+            const t = Date.now() * 0.001;
+            const breathe = Math.sin(t * 2.5) * 0.04;
+            const moveJiggle = Math.min(speed * 0.008, 0.06);
+            this.slimeBody.scale.set(
+                1.0 + Math.sin(t * 3.7) * 0.03 + Math.sin(this.walkTimer * 3) * moveJiggle,
+                1.0 + breathe - moveJiggle * 0.5,
+                1.0 + Math.cos(t * 4.1) * 0.025 + Math.cos(this.walkTimer * 3) * moveJiggle
+            );
+        }
+
+        // Googly eye wobble
+        if (this.pupils) {
+            const t = Date.now() * 0.001;
+            for (let i = 0; i < this.pupils.length; i++) {
+                const eye = this.pupils[i];
+                const off = i * 1.7;
+                eye.rotation.x = Math.sin(t * 1.3 + off) * 0.4 + Math.sin(this.walkTimer * 2 + off) * speed * 0.02;
+                eye.rotation.y = Math.sin(t * 0.9 + off + 2) * 0.5;
+            }
         }
 
         let allowRotation = !this.isAttacking;
@@ -1890,8 +2094,7 @@ function startGame() {
         );
 
         // Create Characters
-        const playerColor = PLAYER_COLORS[existingPlayers % PLAYER_COLORS.length];
-        player = new Character(true, playerColor, spawnPos);
+        player = new Character(true, selectedPlayerColor, spawnPos);
         boss = new Character(false, bossConfig, new THREE.Vector3(0, 0, -5));
 
         // Add aura glow light to boss
@@ -1944,7 +2147,7 @@ function startGame() {
             }
 
             document.getElementById('loadingScreen').classList.add('hidden');
-            player = new Character(true, 0xaaaaaa, new THREE.Vector3(0, 0, 5));
+            player = new Character(true, selectedPlayerColor, new THREE.Vector3(0, 0, 5));
             boss = new Character(false, bossConfig, new THREE.Vector3(0, 0, -5));
 
             // Add aura glow light to boss (offline)

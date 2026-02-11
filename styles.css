@@ -323,6 +323,47 @@ button {
     background: rgba(255,255,255,0.02);
 }
 
+/* Color Picker */
+.color-label {
+    font-family: var(--font-ui);
+    font-size: 0.8rem;
+    font-weight: 400;
+    letter-spacing: 0.18em;
+    color: var(--ash);
+    text-transform: uppercase;
+    margin-top: 6px;
+    margin-bottom: -6px;
+}
+
+.color-picker {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    max-width: 320px;
+}
+
+.color-swatch {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid rgba(232, 220, 200, 0.08);
+    transition: all 0.25s ease;
+    position: relative;
+}
+
+    .color-swatch:hover {
+        border-color: var(--gold);
+        transform: scale(1.2);
+    }
+
+    .color-swatch.selected {
+        border-color: var(--gold);
+        box-shadow: 0 0 14px rgba(212, 168, 83, 0.45), inset 0 0 5px rgba(0,0,0,0.3);
+        transform: scale(1.1);
+    }
+
 .status-text {
     margin-top: 16px;
     color: var(--gold-dim);
