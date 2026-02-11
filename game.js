@@ -296,6 +296,7 @@ let localPlayerId = null;
 let sessionId = null;
 let isHost = false;
 let remotePlayers = {}; // { oderId: { character, lastUpdate, data } }
+let currentHostId = null;
 let sessionRef = null;
 let playersRef = null;
 let bossRef = null;
@@ -389,7 +390,8 @@ const NetworkManager = {
                 const remainingCount = Object.keys(playersData).length - staleKeys.length;
 
                 if (remainingCount <= 0) {
-                    // No live players - take over
+                    // No live players - mark stale session and take over
+                    await sessionRef.update({ state: 'ENDED' });
                     shouldBeHost = true;
                 } else {
                     // There are players, but check if the current host is still among them
@@ -405,6 +407,7 @@ const NetworkManager = {
 
         if (shouldBeHost) {
             isHost = true;
+            currentHostId = localPlayerId;
             // Clear any leftover players from previous session before setting up fresh
             await playersRef.remove();
 
@@ -416,8 +419,12 @@ const NetworkManager = {
                 hostId: localPlayerId,
                 playerCount: 1
             });
+
+            // If we disconnect, remove hostId so others know to migrate
+            sessionRef.child('hostId').onDisconnect().remove();
         } else {
             isHost = false;
+            currentHostId = sessionData.hostId;
             await sessionRef.update({
                 playerCount: firebase.database.ServerValue.increment(1)
             });
@@ -473,6 +480,15 @@ const NetworkManager = {
     },
 
     onPlayerJoined(playerId, data) {
+        // If this player already exists (e.g. rejoin), remove old character first
+        if (remotePlayers[playerId]) {
+            const old = remotePlayers[playerId];
+            if (old.character && old.character.mesh) {
+                scene.remove(old.character.mesh);
+            }
+            delete remotePlayers[playerId];
+        }
+
         const spawnAngle = Math.random() * Math.PI * 2;
         const spawnDist = 6 + Math.random() * 2;
         const spawnPos = new THREE.Vector3(
@@ -518,20 +534,99 @@ const NetworkManager = {
                 scaleBossForPlayerCount();
             }
         }
+
+        // Check if the host just left — if so, attempt migration
+        if (playerId === currentHostId && !isHost) {
+            this.attemptHostMigration();
+        }
+    },
+
+    attemptHostMigration() {
+        // Deterministic election: all clients compute the same result
+        const allIds = [localPlayerId, ...Object.keys(remotePlayers)].sort();
+        const newHostId = allIds[0];
+
+        if (newHostId === localPlayerId) {
+            this.promoteToHost();
+        } else {
+            // Someone else will be host, just update cached hostId
+            currentHostId = newHostId;
+        }
+    },
+
+    async promoteToHost() {
+        isHost = true;
+        currentHostId = localPlayerId;
+
+        // Stop client boss listener (prevents overwriting our own AI decisions)
+        if (bossRef) bossRef.off('value');
+
+        // Update Firebase with new host
+        if (sessionRef) {
+            await sessionRef.update({ hostId: localPlayerId });
+            // Register new onDisconnect for host duties
+            sessionRef.child('hostId').onDisconnect().remove();
+        }
+
+        // Read last boss state from Firebase to sync local boss
+        if (bossRef && boss) {
+            const bossSnap = await bossRef.once('value');
+            const bossData = bossSnap.val();
+            if (bossData) {
+                this.applyBossState(bossData, true);
+            }
+        }
+
+        // Reconstruct base stats from boss config
+        if (sessionRef) {
+            const sessionSnap = await sessionRef.once('value');
+            const sessionData = sessionSnap.val();
+            if (sessionData && sessionData.bossName) {
+                const config = GL.getBossConfig(sessionData.bossName);
+                baseBossHealth = config.health;
+                baseBossPosture = config.posture;
+            }
+        }
+
+        // Reset damage tracker and rescale boss for current player count
+        bossDamageTracker = {};
+        localBossDamage = 0;
+        scaleBossForPlayerCount();
+
+        createFloatingText('HOST MIGRATED', new THREE.Vector3(0, 3, 0), '#ffd700');
     },
 
     onPlayerUpdate(playerId, data) {
         const remote = remotePlayers[playerId];
-        if (!remote || !data.state) return;
+        if (!remote) return;
 
-        const s = data.state;
         remote.lastUpdate = Date.now();
+        remote.data = data;
+
+        // Update color if it changed (e.g. player rejoined with different color)
+        if (data.color !== undefined && remote.character && remote.character.baseColor !== data.color) {
+            const newColor = data.color || 0x4fc3f7;
+            remote.character.baseColor = newColor;
+            remote.character.bodyMat.color.setHex(newColor);
+            remote.character.bodyMat.emissive.setHex(newColor);
+            if (remote.character.innerGlow) {
+                remote.character.innerGlow.color.setHex(newColor);
+            }
+        }
+
+        if (!data.state) return;
+        const s = data.state;
 
         if (s.pos) {
             remote.targetPos.set(s.pos.x, s.pos.y || 0, s.pos.z);
         }
         if (s.rot !== undefined) {
             remote.targetRot = s.rot;
+        }
+
+        // Host uses client-reported damage for boss targeting
+        if (isHost && s.bossDmg !== undefined) {
+            bossDamageTracker[playerId] = s.bossDmg;
         }
 
         // Apply action states
@@ -568,7 +663,8 @@ const NetworkManager = {
             healing: player.isHealing,
             health: player.health,
             posture: player.posture,
-            stunned: player.stunTimer > 0
+            stunned: player.stunTimer > 0,
+            bossDmg: localBossDamage
         };
 
         playersRef.child(localPlayerId).child('state').set(state);
@@ -586,6 +682,7 @@ const NetworkManager = {
             attacking: boss.isAttacking,
             attackType: boss.attackType,
             attackTimer: boss.attackTimer,
+            swingType: boss.swingType,
             specialAttacking: boss.isSpecialAttacking,
             specialType: boss.specialType,
             stunned: boss.stunTimer > 0,
@@ -594,8 +691,8 @@ const NetworkManager = {
         bossRef.set(state);
     },
 
-    applyBossState(data) {
-        if (!boss || isHost) return;
+    applyBossState(data, force = false) {
+        if (!boss || (isHost && !force)) return;
         // Interpolate position
         boss.mesh.position.lerp(
             new THREE.Vector3(data.pos.x, data.pos.y || 0, data.pos.z),
@@ -615,6 +712,8 @@ const NetworkManager = {
             boss.isAttacking = true;
             boss.attackType = data.attackType;
             boss.attackTimer = data.attackTimer;
+            boss.swingType = data.swingType || 0;
+            boss.hasHit = false;
         } else if (!data.attacking) {
             boss.isAttacking = false;
         }
@@ -628,6 +727,11 @@ const NetworkManager = {
         }
 
         boss.stunTimer = data.stunned ? 1.0 : 0;
+
+        // Sync target from host so client boss faces the same player
+        if (data.targetId) {
+            boss.currentTargetId = data.targetId;
+        }
     },
 
     updatePlayerCount() {
@@ -653,7 +757,16 @@ const NetworkManager = {
     },
 
     updateRemotePlayers(dt) {
+        const staleIds = [];
+
         for (const [id, remote] of Object.entries(remotePlayers)) {
+            // Check for stale players (no update in >10 seconds)
+            const timeSinceUpdate = Date.now() - remote.lastUpdate;
+            if (timeSinceUpdate > 10000) {
+                staleIds.push(id);
+                continue;
+            }
+
             const char = remote.character;
             if (!char || !char.mesh) continue;
 
@@ -670,6 +783,12 @@ const NetworkManager = {
 
             // Update character (handles animations)
             char.update(dt, boss);
+        }
+
+        // Remove stale players
+        for (const id of staleIds) {
+            this.onPlayerLeft(id);
+            if (playersRef) playersRef.child(id).remove();
         }
 
         this.updateAllyHuds();
@@ -689,6 +808,14 @@ const NetworkManager = {
     },
 
     cleanup() {
+        // Mark session ENDED if we're the host and no remote players remain
+        if (isHost && sessionRef) {
+            const remainingRemotes = Object.keys(remotePlayers).length;
+            if (remainingRemotes === 0) {
+                sessionRef.update({ state: 'ENDED' });
+            }
+        }
+
         if (playersRef) {
             playersRef.off();
             if (localPlayerId) {
@@ -703,6 +830,7 @@ const NetworkManager = {
             }
         }
         remotePlayers = {};
+        currentHostId = null;
         sessionRef = null;
         playersRef = null;
         bossRef = null;
@@ -716,6 +844,7 @@ const NetworkManager = {
 let baseBossHealth = 0;
 let baseBossPosture = 0;
 let bossDamageTracker = {}; // { playerId: totalDamage }
+let localBossDamage = 0; // cumulative damage this player dealt to boss
 
 function scaleBossForPlayerCount() {
     if (!boss) return;
@@ -1978,7 +2107,24 @@ class Character {
             AudioSystem.playPostureBreak();
         }
         if (this.health <= 0) {
-            endGame(this.isPlayer ? false : true);
+            if (this.isRemote) {
+                // Remote player death is handled by their own client — don't end our game
+                return;
+            }
+            if (!this.isPlayer) {
+                // Boss died — victory for everyone
+                endGame(true);
+            } else {
+                // Local player died
+                const hasAllies = Object.keys(remotePlayers).length > 0;
+                if (hasAllies) {
+                    // Other players still alive — leave the session, don't end for everyone
+                    onLocalPlayerDeath();
+                } else {
+                    // Solo — normal death
+                    endGame(false);
+                }
+            }
         }
     }
 }
@@ -2109,6 +2255,7 @@ function startGame() {
         baseBossHealth = boss.maxHealth;
         baseBossPosture = boss.maxPosture;
         bossDamageTracker = {};
+        localBossDamage = 0;
 
         // Reset aura state
         bossAuraParticles.forEach(p => { scene.remove(p); p.material.dispose(); });
@@ -2310,28 +2457,49 @@ function updatePhysics(dt) {
     resolveCollision(boss.mesh.position, boss.bodyRadius);
 
     // Get current boss target for updates
-    const bossTarget = selectBossTarget();
-    const bossTargetChar = bossTarget ? bossTarget.character : player;
+    let bossTargetChar = player;
+    if (isHost) {
+        // Host runs target selection with threat scoring
+        const bossTarget = selectBossTarget();
+        bossTargetChar = bossTarget ? bossTarget.character : player;
+    } else {
+        // Client uses the host's synced targetId for consistent visuals
+        const syncedTargetId = boss.currentTargetId;
+        if (syncedTargetId === localPlayerId) {
+            bossTargetChar = player;
+        } else if (syncedTargetId && remotePlayers[syncedTargetId]) {
+            bossTargetChar = remotePlayers[syncedTargetId].character;
+        }
+    }
 
     player.update(dt, boss);
     boss.update(dt, bossTargetChar);
 
+    // Tick attack timers once per frame (not per-defender in handleAttacks)
+    tickAttackTimer(player, dt);
+    tickAttackTimer(boss, dt);
+    for (const [, remote] of Object.entries(remotePlayers)) {
+        tickAttackTimer(remote.character, dt);
+    }
+
     // Handle attacks between local player and boss
     const bossHpBefore = boss.health;
-    handleAttacks(player, boss, dt);
+    handleAttacks(player, boss);
     if (boss.health < bossHpBefore) {
-        bossDamageTracker[localPlayerId] = (bossDamageTracker[localPlayerId] || 0) + (bossHpBefore - boss.health);
+        const dmg = bossHpBefore - boss.health;
+        bossDamageTracker[localPlayerId] = (bossDamageTracker[localPlayerId] || 0) + dmg;
+        localBossDamage += dmg;
     }
-    handleAttacks(boss, player, dt);
+    handleAttacks(boss, player);
 
     // Handle attacks between boss and remote players (both directions)
     for (const [id, remote] of Object.entries(remotePlayers)) {
         const hpBefore = boss.health;
-        handleAttacks(remote.character, boss, dt);
+        handleAttacks(remote.character, boss);
         if (boss.health < hpBefore) {
             bossDamageTracker[id] = (bossDamageTracker[id] || 0) + (hpBefore - boss.health);
         }
-        handleAttacks(boss, remote.character, dt);
+        handleAttacks(boss, remote.character);
     }
 
     const midPoint = player.mesh.position.clone().add(boss.mesh.position).multiplyScalar(0.5);
@@ -2569,7 +2737,18 @@ function updateBossAI(dt) {
     }
 }
 
-function handleAttacks(attacker, defender, dt) {
+function tickAttackTimer(char, dt) {
+    if (!char) return;
+    if (char.isAttacking) {
+        char.attackTimer -= dt;
+        if (char.attackTimer <= 0) {
+            char.isAttacking = false;
+            char.hasHit = false;
+        }
+    }
+}
+
+function handleAttacks(attacker, defender) {
     if (attacker.isSpecialAttacking) {
         let hit = false;
         const defPos = defender.mesh.position;
@@ -2605,8 +2784,6 @@ function handleAttacks(attacker, defender, dt) {
     }
 
     if (attacker.isAttacking) {
-        attacker.attackTimer -= dt;
-
         // Use GameLogic for hit windows
         if (GL.isInHitWindow(attacker.attackTimer, attacker.attackType) && !attacker.hasHit) {
             let hitRegistered = false;
@@ -2675,11 +2852,6 @@ function handleAttacks(attacker, defender, dt) {
                     }
                 }
             }
-        }
-
-        if (attacker.attackTimer <= 0) {
-            attacker.isAttacking = false;
-            attacker.hasHit = false;
         }
     }
 }
@@ -2904,6 +3076,37 @@ function animate() {
     }
 
     renderer.render(scene, camera);
+}
+
+function onLocalPlayerDeath() {
+    // Player died in multiplayer — leave the session so others can continue
+    gameState = 'ENDED';
+    document.exitPointerLock?.();
+
+    // Remove local player from Firebase so others see them leave (triggers host migration if needed)
+    if (playersRef && localPlayerId) {
+        playersRef.child(localPlayerId).remove();
+    }
+
+    const endScreen = document.getElementById('endScreen');
+    const endText = document.getElementById('endText');
+    const bossName = document.getElementById('hudBossName').innerText;
+
+    endScreen.classList.remove('hidden');
+    endScreen.classList.add('death-screen');
+
+    const loseMessages = [
+        "DEATH",
+        "YOU DIED",
+        `CRUSHED BY ${bossName}`,
+        "UNWORTHY",
+        "FATE SEALED",
+        "BROKEN"
+    ];
+    endText.innerText = loseMessages[Math.floor(Math.random() * loseMessages.length)];
+    endText.classList.remove('victory-text');
+    endText.classList.add('death-text');
+    setTimeout(() => endScreen.classList.add('show-death'), 100);
 }
 
 function endGame(victory) {

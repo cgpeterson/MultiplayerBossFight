@@ -3,7 +3,8 @@
     "allow": [
       "Bash(dir:*)",
       "Bash(findstr:*)",
-      "Bash(npx jest --no-cache)"
+      "Bash(npx jest --no-cache)",
+      "Bash(npx jest --no-coverage)"
     ]
   }
 }
