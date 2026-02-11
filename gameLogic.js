@@ -255,6 +255,11 @@
         const healthPercent = target.health / target.maxHealth;
         if (healthPercent < 0.3) score += 40;
 
+        // Aggro from cumulative damage dealt to boss
+        if (target.damageDealt > 0) {
+            score += Math.min(target.damageDealt * 0.5, 100);
+        }
+
         // Sticky target bonus
         if (currentTargetId === target.id) {
             score += 25;

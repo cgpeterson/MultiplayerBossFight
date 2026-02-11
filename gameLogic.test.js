@@ -1,5 +1,5 @@
 /**
- * Unit Tests for Shadow Duel 3D Game Logic
+ * Unit Tests for Hollow Duel — Game Logic Module
  */
 
 const {
@@ -387,7 +387,7 @@ describe('Attack Timing', () => {
 describe('AI Target Scoring', () => {
     describe('calculateThreatScore', () => {
         const bossPos = { x: 0, z: 0 };
-        
+
         const createTarget = (overrides = {}) => ({
             id: 'player1',
             position: { x: 5, z: 0 },
@@ -403,60 +403,90 @@ describe('AI Target Scoring', () => {
         it('should prefer closer targets', () => {
             const closeTarget = createTarget({ position: { x: 2, z: 0 } });
             const farTarget = createTarget({ position: { x: 10, z: 0 } });
-            
+
             const closeScore = calculateThreatScore(closeTarget, bossPos);
             const farScore = calculateThreatScore(farTarget, bossPos);
-            
+
             expect(closeScore).toBeGreaterThan(farScore);
         });
 
         it('should prioritize attacking targets', () => {
             const attacking = createTarget({ isAttacking: true });
             const passive = createTarget({ isAttacking: false });
-            
+
             const attackingScore = calculateThreatScore(attacking, bossPos);
             const passiveScore = calculateThreatScore(passive, bossPos);
-            
+
             expect(attackingScore).toBeGreaterThan(passiveScore);
         });
 
         it('should prioritize stunned targets', () => {
             const stunned = createTarget({ isStunned: true });
             const normal = createTarget({ isStunned: false });
-            
+
             const stunnedScore = calculateThreatScore(stunned, bossPos);
             const normalScore = calculateThreatScore(normal, bossPos);
-            
+
             expect(stunnedScore).toBeGreaterThan(normalScore);
         });
 
         it('should prioritize healing targets', () => {
             const healing = createTarget({ isHealing: true });
             const normal = createTarget({ isHealing: false });
-            
+
             const healingScore = calculateThreatScore(healing, bossPos);
             const normalScore = calculateThreatScore(normal, bossPos);
-            
+
             expect(healingScore).toBeGreaterThan(normalScore);
         });
 
         it('should prioritize low health targets', () => {
             const lowHealth = createTarget({ health: 20, maxHealth: 100 });
             const fullHealth = createTarget({ health: 100, maxHealth: 100 });
-            
+
             const lowHealthScore = calculateThreatScore(lowHealth, bossPos);
             const fullHealthScore = calculateThreatScore(fullHealth, bossPos);
-            
+
             expect(lowHealthScore).toBeGreaterThan(fullHealthScore);
         });
 
         it('should give bonus to current target (sticky targeting)', () => {
             const target = createTarget({ id: 'player1' });
-            
+
             const stickyScore = calculateThreatScore(target, bossPos, 'player1');
             const nonStickyScore = calculateThreatScore(target, bossPos, 'player2');
-            
+
             expect(stickyScore).toBeGreaterThan(nonStickyScore);
+        });
+
+        it('should prioritize targets that dealt more damage', () => {
+            const highDamage = createTarget({ damageDealt: 200 });
+            const lowDamage = createTarget({ damageDealt: 10 });
+
+            const highScore = calculateThreatScore(highDamage, bossPos);
+            const lowScore = calculateThreatScore(lowDamage, bossPos);
+
+            expect(highScore).toBeGreaterThan(lowScore);
+        });
+
+        it('should cap damage threat bonus at 100', () => {
+            const hugeDamage = createTarget({ damageDealt: 500 });
+            const cappedDamage = createTarget({ damageDealt: 200 });
+
+            const hugeScore = calculateThreatScore(hugeDamage, bossPos);
+            const cappedScore = calculateThreatScore(cappedDamage, bossPos);
+
+            expect(hugeScore).toBe(cappedScore);
+        });
+
+        it('should handle zero or missing damageDealt gracefully', () => {
+            const noDamage = createTarget({ damageDealt: 0 });
+            const missingDamage = createTarget({});
+
+            const noDamageScore = calculateThreatScore(noDamage, bossPos);
+            const missingScore = calculateThreatScore(missingDamage, bossPos);
+
+            expect(noDamageScore).toBe(missingScore);
         });
     });
 });

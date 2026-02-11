@@ -660,6 +660,19 @@ const NetworkManager = {
         this.updateAllyHuds();
     },
 
+    discoverExistingPlayers() {
+        if (!playersRef) return;
+        playersRef.once('value', snap => {
+            const playersData = snap.val();
+            if (!playersData) return;
+            for (const [id, data] of Object.entries(playersData)) {
+                if (id !== localPlayerId && !remotePlayers[id]) {
+                    this.onPlayerJoined(id, data);
+                }
+            }
+        });
+    },
+
     cleanup() {
         if (playersRef) {
             playersRef.off();
@@ -687,6 +700,7 @@ const NetworkManager = {
 // ===========================================
 let baseBossHealth = 0;
 let baseBossPosture = 0;
+let bossDamageTracker = {}; // { playerId: totalDamage }
 
 function scaleBossForPlayerCount() {
     if (!boss) return;
@@ -752,7 +766,8 @@ function selectBossTarget() {
             isStunned: char.stunTimer > 0,
             isHealing: char.isHealing,
             health: char.health,
-            maxHealth: char.maxHealth
+            maxHealth: char.maxHealth,
+            damageDealt: bossDamageTracker[target.id] || 0
         };
 
         const score = GL.calculateThreatScore(targetData, boss.mesh.position, boss.currentTargetId);
@@ -1849,6 +1864,10 @@ function startGame() {
         }
         remotePlayers = {};
 
+        // Re-discover existing remote players (e.g. the host) that were
+        // found by child_added during joinOrCreateSession but wiped above.
+        NetworkManager.discoverExistingPlayers();
+
         // Initialize Map
         createEnvironment(mapType);
 
@@ -1886,6 +1905,7 @@ function startGame() {
         // Store base boss stats for scaling
         baseBossHealth = boss.maxHealth;
         baseBossPosture = boss.maxPosture;
+        bossDamageTracker = {};
 
         // Reset aura state
         bossAuraParticles.forEach(p => { scene.remove(p); p.material.dispose(); });
@@ -2094,11 +2114,20 @@ function updatePhysics(dt) {
     boss.update(dt, bossTargetChar);
 
     // Handle attacks between local player and boss
+    const bossHpBefore = boss.health;
     handleAttacks(player, boss, dt);
+    if (boss.health < bossHpBefore) {
+        bossDamageTracker[localPlayerId] = (bossDamageTracker[localPlayerId] || 0) + (bossHpBefore - boss.health);
+    }
     handleAttacks(boss, player, dt);
 
-    // Handle attacks between boss and remote players
+    // Handle attacks between boss and remote players (both directions)
     for (const [id, remote] of Object.entries(remotePlayers)) {
+        const hpBefore = boss.health;
+        handleAttacks(remote.character, boss, dt);
+        if (boss.health < hpBefore) {
+            bossDamageTracker[id] = (bossDamageTracker[id] || 0) + (hpBefore - boss.health);
+        }
         handleAttacks(boss, remote.character, dt);
     }
 
@@ -2173,7 +2202,12 @@ function updateBossAI(dt) {
         }
     }
 
-    if (target.isAttacking && target.attackTimer > 0.15 && dist < 6.0 &&
+    // Boss can only react to attacks it can see (within frontal arc)
+    const bossForward = new THREE.Vector3(0, 0, 1).applyQuaternion(boss.mesh.quaternion);
+    const toTarget = target.mesh.position.clone().sub(boss.mesh.position).normalize();
+    const canSeeTarget = bossForward.dot(toTarget) > 0.2; // ~145° frontal arc
+
+    if (canSeeTarget && target.isAttacking && target.attackTimer > 0.15 && dist < 6.0 &&
         boss.aiState !== 'DEFEND' && boss.aiState !== 'ATTACK' &&
         boss.aiState !== 'PERILOUS_PREP' && boss.aiState !== 'RECOVER' &&
         !target.isHealing && !target.stunTimer) {

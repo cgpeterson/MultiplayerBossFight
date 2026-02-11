@@ -1,0 +1,58 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic:
+    - generic:
+      - generic: Entering the arena...
+  - generic:
+    - heading "Hollow Duel" [level=1]
+    - generic: A Souls-Like Combat Experience
+    - generic: ◆
+    - generic:
+      - textbox "Enter Your Name"
+      - textbox "Boss Name (shared session)": Sword Saint
+      - combobox:
+        - option "Dark Arena" [selected]
+        - option "Snowy Forest"
+        - option "Green Meadow"
+      - button "Enter the Arena"
+      - generic: Connecting...
+    - generic:
+      - paragraph:
+        - generic: WASD
+        - text: Move
+        - generic: SPACE
+        - text: Dash
+        - generic: E
+        - text: Heal
+        - generic: L-CLICK
+        - text: Attack (hold heavy)
+        - generic: R-CLICK
+        - text: Deflect
+      - paragraph:
+        - generic: L-STICK
+        - text: Move
+        - generic: A
+        - text: Dash
+        - generic: "Y"
+        - text: Heal
+        - generic: X / RB
+        - text: Attack
+        - generic: LB
+        - text: Deflect
+  - generic:
+    - generic:
+      - generic:
+        - generic: Sword Saint
+        - generic: Tank
+    - generic:
+      - generic: Wolf
+    - generic: "Players: 1"
+    - generic:
+      - generic: "3"
+    - generic: 危
+  - generic:
+    - generic: DEATH
+    - button "Return"
+```
