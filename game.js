@@ -1263,123 +1263,101 @@ class Character {
 
         this.baseColor = this.config.color !== undefined ? this.config.color : (isPlayer ? 0xaaaaaa : 0xff0000);
 
-        // --- Slime Material (translucent, shiny, slight inner glow) ---
-        this.baseOpacity = 0.7;
-        this.baseEmissiveIntensity = 0.08;
-        this.bodyMat = new THREE.MeshStandardMaterial({
-            color: this.baseColor,
-            transparent: true,
-            opacity: this.baseOpacity,
-            metalness: 0.1,
-            roughness: 0.15,
-            emissive: this.baseColor,
-            emissiveIntensity: this.baseEmissiveIntensity,
-            side: THREE.DoubleSide
-        });
-
         this.bodyRadius = 0.5;
         this.bodyHeight = 1.2;
         const bodyY = 1.0 + this.bodyHeight / 2;
 
-        // --- Single pear-shaped body (Grimace silhouette via LatheGeometry) ---
-        const profile = [];
-        const bodySegs = 24;
-        for (let i = 0; i <= bodySegs; i++) {
-            const t = i / bodySegs;
-            const y = t * 1.5 - 0.75; // centered: -0.75 to +0.75
-            let r;
-            if (t < 0.05) {
-                r = (t / 0.05) * 0.25;
-            } else if (t < 0.35) {
-                const bt = (t - 0.05) / 0.3;
-                r = 0.25 + Math.sin(bt * Math.PI / 2) * 0.37;
-            } else if (t < 0.75) {
-                const ut = (t - 0.35) / 0.4;
-                r = 0.62 - ut * 0.3;
-            } else {
-                const nt = (t - 0.75) / 0.25;
-                r = 0.32 - nt * 0.2;
-            }
-            profile.push(new THREE.Vector2(r, y));
-        }
-        const bodyGeo = new THREE.LatheGeometry(profile, 20);
-        this.slimeBody = new THREE.Mesh(bodyGeo, this.bodyMat);
-        this.slimeBody.position.y = bodyY;
-        this.slimeBody.castShadow = true;
-        this.mesh.add(this.slimeBody);
-        this.slimeBodyBasePos = new Float32Array(bodyGeo.attributes.position.array);
-
-        // Inner glow light
-        const innerGlow = new THREE.PointLight(this.baseColor, 0.55, 3);
-        innerGlow.position.y = bodyY;
-        this.mesh.add(innerGlow);
-        this.innerGlow = innerGlow;
-
-        // --- Small head on spring (Human Fall Flat style lag) ---
-        this.headRestY = bodyY + 0.72;
-        this.head = new THREE.Group();
-        this.head.position.set(0, this.headRestY, 0);
-        this.mesh.add(this.head);
-
-        // Visible small head sphere
-        const headGeo = new THREE.SphereGeometry(0.22, 14, 12);
-        const headMesh = new THREE.Mesh(headGeo, this.bodyMat);
-        headMesh.castShadow = true;
-        this.head.add(headMesh);
-
-        // Neck nub (connects head to body)
-        const neckGeo = new THREE.SphereGeometry(0.13, 10, 8);
-        const neck = new THREE.Mesh(neckGeo, this.bodyMat);
-        neck.position.y = -0.18;
-        neck.scale.set(1.0, 1.4, 1.0);
-        this.head.add(neck);
-
-        // Spring physics state
-        this.headSpringOffset = new THREE.Vector3();
-        this.headSpringVel = new THREE.Vector3();
-
-        // Googly eyes (on the small head)
-        this.pupils = [];
-        const eyeWhiteGeo = new THREE.SphereGeometry(0.12, 12, 12);
-        const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, metalness: 0.0 });
-        const pupilGeo = new THREE.SphereGeometry(0.065, 10, 10);
-        const pupilMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
-
-        for (let i = -1; i <= 1; i += 2) {
-            const eyeWhite = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat);
-            eyeWhite.position.set(i * 0.13, 0.04, 0.17);
-            if (i > 0) eyeWhite.scale.setScalar(1.1);
-            this.head.add(eyeWhite);
-
-            const pupil = new THREE.Mesh(pupilGeo, pupilMat);
-            pupil.position.set(0, 0, 0.08);
-            eyeWhite.add(pupil);
-            this.pupils.push(eyeWhite);
-        }
-
-        // Boss: angry brow ridges + crown bumps
         if (!isPlayer) {
-            const browMat = new THREE.MeshStandardMaterial({
-                color: new THREE.Color(this.baseColor).multiplyScalar(0.45),
-                transparent: true, opacity: 0.85, roughness: 0.3
+            this.buildSamuraiModel(bodyY);
+        } else {
+            // --- Slime Material (translucent, shiny, slight inner glow) ---
+            this.baseOpacity = 0.7;
+            this.baseEmissiveIntensity = 0.08;
+            this.bodyMat = new THREE.MeshStandardMaterial({
+                color: this.baseColor,
+                transparent: true,
+                opacity: this.baseOpacity,
+                metalness: 0.1,
+                roughness: 0.15,
+                emissive: this.baseColor,
+                emissiveIntensity: this.baseEmissiveIntensity,
+                side: THREE.DoubleSide
             });
-            for (let i = -1; i <= 1; i += 2) {
-                const browGeo = new THREE.BoxGeometry(0.18, 0.05, 0.08);
-                const brow = new THREE.Mesh(browGeo, browMat);
-                brow.position.set(i * 0.13, 0.18, 0.19);
-                brow.rotation.z = i * -0.3;
-                this.head.add(brow);
+
+            // --- Single pear-shaped body (Grimace silhouette via LatheGeometry) ---
+            const profile = [];
+            const bodySegs = 24;
+            for (let i = 0; i <= bodySegs; i++) {
+                const t = i / bodySegs;
+                const y = t * 1.5 - 0.75;
+                let r;
+                if (t < 0.05) {
+                    r = (t / 0.05) * 0.25;
+                } else if (t < 0.35) {
+                    const bt = (t - 0.05) / 0.3;
+                    r = 0.25 + Math.sin(bt * Math.PI / 2) * 0.37;
+                } else if (t < 0.75) {
+                    const ut = (t - 0.35) / 0.4;
+                    r = 0.62 - ut * 0.3;
+                } else {
+                    const nt = (t - 0.75) / 0.25;
+                    r = 0.32 - nt * 0.2;
+                }
+                profile.push(new THREE.Vector2(r, y));
             }
-            const bumpGeo = new THREE.SphereGeometry(0.07, 8, 8);
-            const bumpMat = new THREE.MeshStandardMaterial({
-                color: this.baseColor, transparent: true, opacity: 0.8,
-                emissive: this.baseColor, emissiveIntensity: 0.15, roughness: 0.2
-            });
-            for (let i = 0; i < 3; i++) {
-                const bump = new THREE.Mesh(bumpGeo, bumpMat);
-                const angle = (i - 1) * 0.6;
-                bump.position.set(Math.sin(angle) * 0.14, 0.26 + Math.cos(i) * 0.03, Math.cos(angle) * 0.06);
-                this.head.add(bump);
+            const bodyGeo = new THREE.LatheGeometry(profile, 20);
+            this.slimeBody = new THREE.Mesh(bodyGeo, this.bodyMat);
+            this.slimeBody.position.y = bodyY;
+            this.slimeBody.castShadow = true;
+            this.mesh.add(this.slimeBody);
+            this.slimeBodyBasePos = new Float32Array(bodyGeo.attributes.position.array);
+
+            // Inner glow light
+            const innerGlow = new THREE.PointLight(this.baseColor, 0.55, 3);
+            innerGlow.position.y = bodyY;
+            this.mesh.add(innerGlow);
+            this.innerGlow = innerGlow;
+
+            // --- Small head on spring (Human Fall Flat style lag) ---
+            this.headRestY = bodyY + 0.72;
+            this.head = new THREE.Group();
+            this.head.position.set(0, this.headRestY, 0);
+            this.mesh.add(this.head);
+
+            // Visible small head sphere
+            const headGeo = new THREE.SphereGeometry(0.22, 14, 12);
+            const headMesh = new THREE.Mesh(headGeo, this.bodyMat);
+            headMesh.castShadow = true;
+            this.head.add(headMesh);
+
+            // Neck nub (connects head to body)
+            const neckGeo = new THREE.SphereGeometry(0.13, 10, 8);
+            const neck = new THREE.Mesh(neckGeo, this.bodyMat);
+            neck.position.y = -0.18;
+            neck.scale.set(1.0, 1.4, 1.0);
+            this.head.add(neck);
+
+            // Spring physics state
+            this.headSpringOffset = new THREE.Vector3();
+            this.headSpringVel = new THREE.Vector3();
+
+            // Googly eyes (on the small head)
+            this.pupils = [];
+            const eyeWhiteGeo = new THREE.SphereGeometry(0.12, 12, 12);
+            const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, metalness: 0.0 });
+            const pupilGeo = new THREE.SphereGeometry(0.065, 10, 10);
+            const pupilMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+
+            for (let i = -1; i <= 1; i += 2) {
+                const eyeWhite = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat);
+                eyeWhite.position.set(i * 0.13, 0.04, 0.17);
+                if (i > 0) eyeWhite.scale.setScalar(1.1);
+                this.head.add(eyeWhite);
+
+                const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+                pupil.position.set(0, 0, 0.08);
+                eyeWhite.add(pupil);
+                this.pupils.push(eyeWhite);
             }
         }
 
@@ -1392,13 +1370,58 @@ class Character {
         this.armPivot.add(this.weaponGroup);
 
         const swordLen = 3.5;
-        const bladeGeo = new THREE.BoxGeometry(0.12, swordLen, 0.04);
-        const swordMat = new THREE.MeshStandardMaterial({
-            color: 0xdadada, metalness: 0.9, roughness: 0.1, emissive: 0x111111
-        });
-        this.sword = new THREE.Mesh(bladeGeo, swordMat);
-        this.sword.position.y = swordLen / 2;
-        this.weaponGroup.add(this.sword);
+
+        if (!isPlayer) {
+            // --- Katana ---
+            const bladeGeo = new THREE.BoxGeometry(0.08, swordLen, 0.02);
+            // Shear for katana curve
+            const posAttr = bladeGeo.attributes.position;
+            for (let vi = 0; vi < posAttr.count; vi++) {
+                const y = posAttr.getY(vi);
+                posAttr.setZ(vi, posAttr.getZ(vi) + y * 0.06);
+            }
+            posAttr.needsUpdate = true;
+            const katanaMat = new THREE.MeshStandardMaterial({
+                color: 0xf0f0f0, metalness: 0.95, roughness: 0.05
+            });
+            this.sword = new THREE.Mesh(bladeGeo, katanaMat);
+            this.sword.position.y = swordLen / 2;
+            this.weaponGroup.add(this.sword);
+
+            // Tsuba (guard)
+            const tsubaGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.04, 8);
+            const tsubaMat = new THREE.MeshStandardMaterial({
+                color: 0xb8860b, metalness: 0.9, roughness: 0.15,
+                emissive: 0x4a3000, emissiveIntensity: 0.3
+            });
+            const tsuba = new THREE.Mesh(tsubaGeo, tsubaMat);
+            this.weaponGroup.add(tsuba);
+
+            // Tsuka (handle)
+            const tsukaGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.8);
+            const tsukaMat = new THREE.MeshStandardMaterial({ color: 0x1a0a0a, roughness: 0.9 });
+            const tsuka = new THREE.Mesh(tsukaGeo, tsukaMat);
+            tsuka.position.y = -0.4;
+            this.weaponGroup.add(tsuka);
+        } else {
+            // --- Regular sword ---
+            const bladeGeo = new THREE.BoxGeometry(0.12, swordLen, 0.04);
+            const swordMat = new THREE.MeshStandardMaterial({
+                color: 0xdadada, metalness: 0.9, roughness: 0.1, emissive: 0x111111
+            });
+            this.sword = new THREE.Mesh(bladeGeo, swordMat);
+            this.sword.position.y = swordLen / 2;
+            this.weaponGroup.add(this.sword);
+
+            const guardGeo = new THREE.BoxGeometry(0.6, 0.1, 0.1);
+            const guard = new THREE.Mesh(guardGeo, new THREE.MeshStandardMaterial({ color: 0x333333 }));
+            this.weaponGroup.add(guard);
+
+            const handleGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.6);
+            const handle = new THREE.Mesh(handleGeo, new THREE.MeshStandardMaterial({ color: 0x5c3a21 }));
+            handle.position.y = -0.3;
+            this.weaponGroup.add(handle);
+        }
 
         this.hitboxPoints = [];
         const numPoints = 12;
@@ -1410,15 +1433,6 @@ class Character {
             this.sword.add(pt);
             this.hitboxPoints.push(pt);
         }
-
-        const guardGeo = new THREE.BoxGeometry(0.6, 0.1, 0.1);
-        const guard = new THREE.Mesh(guardGeo, new THREE.MeshStandardMaterial({ color: 0x333333 }));
-        this.weaponGroup.add(guard);
-
-        const handleGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.6);
-        const handle = new THREE.Mesh(handleGeo, new THREE.MeshStandardMaterial({ color: 0x5c3a21 }));
-        handle.position.y = -0.3;
-        this.weaponGroup.add(handle);
 
         // Hand targets (IK)
         this.ikJoints = {};
@@ -1449,6 +1463,31 @@ class Character {
 
         this.createLimb('left', 'leg');
         this.createLimb('right', 'leg');
+
+        // Swap limb materials for boss (armored look)
+        if (!isPlayer) {
+            const armorLimbMat = new THREE.MeshStandardMaterial({
+                color: 0x1a1a2e, metalness: 0.85, roughness: 0.35
+            });
+            const armorJointMat = new THREE.MeshStandardMaterial({
+                color: 0x2a2a3e, metalness: 0.7, roughness: 0.3
+            });
+            for (const side of ['left', 'right']) {
+                for (const joints of [this.ikJoints, this.ikJointsLegs]) {
+                    if (joints[side]) {
+                        joints[side].upper.material = armorLimbMat;
+                        joints[side].lower.material = armorLimbMat;
+                        joints[side].rootMesh.material = armorJointMat;
+                        if (joints[side].upper.children.length > 0) {
+                            joints[side].upper.children[0].material = armorJointMat;
+                        }
+                        if (joints[side].lower.children.length > 0) {
+                            joints[side].lower.children[0].material = armorJointMat;
+                        }
+                    }
+                }
+            }
+        }
 
         this.maxHealth = this.config.health || (isPlayer ? 100 : 300);
         this.health = this.maxHealth;
@@ -1485,6 +1524,176 @@ class Character {
         this.isSpecialAttacking = false;
         this.specialType = '';
         this.hasSlammed = false;
+    }
+
+    buildSamuraiModel(bodyY) {
+        // --- Materials ---
+        const armorMat = new THREE.MeshStandardMaterial({
+            color: 0x1a1a2e, metalness: 0.85, roughness: 0.35
+        });
+        const lacquerColor = new THREE.Color(this.baseColor).multiplyScalar(0.45);
+        const lacquerMat = new THREE.MeshStandardMaterial({
+            color: lacquerColor, metalness: 0.4, roughness: 0.2,
+            emissive: this.baseColor, emissiveIntensity: 0.12
+        });
+        const goldMat = new THREE.MeshStandardMaterial({
+            color: 0xb8860b, metalness: 0.9, roughness: 0.15,
+            emissive: 0x4a3000, emissiveIntensity: 0.3
+        });
+        const faceMat = new THREE.MeshStandardMaterial({
+            color: 0x2a2a2a, metalness: 0.7, roughness: 0.3
+        });
+
+        this.baseOpacity = 1.0;
+        this.baseEmissiveIntensity = 0.08;
+        this.bodyMat = armorMat;
+
+        // --- Dō (chest armor torso) — tapered cylinder ---
+        const torsoGeo = new THREE.CylinderGeometry(0.45, 0.35, 1.2, 14);
+        this.slimeBody = new THREE.Mesh(torsoGeo, armorMat);
+        this.slimeBody.scale.z = 0.75;
+        this.slimeBody.position.y = bodyY;
+        this.slimeBody.castShadow = true;
+        this.mesh.add(this.slimeBody);
+        this.slimeBodyBasePos = null; // skip vertex deformation
+
+        // Breast plate overlay
+        const breastGeo = new THREE.SphereGeometry(0.42, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+        const breast = new THREE.Mesh(breastGeo, lacquerMat);
+        breast.rotation.x = Math.PI;
+        breast.position.set(0, bodyY + 0.25, 0.08);
+        breast.scale.set(1, 0.4, 0.5);
+        this.mesh.add(breast);
+
+        // Gold chest bands (3 half-ring tori)
+        for (let b = 0; b < 3; b++) {
+            const bandGeo = new THREE.TorusGeometry(0.38, 0.015, 6, 18, Math.PI);
+            const band = new THREE.Mesh(bandGeo, goldMat);
+            band.position.set(0, bodyY + 0.2 - b * 0.2, 0.2);
+            band.rotation.y = Math.PI;
+            band.scale.z = 0.75;
+            this.mesh.add(band);
+        }
+
+        // --- Shoulder plates (sode) — half-sphere + gold edge ---
+        for (let i = -1; i <= 1; i += 2) {
+            const sodeGeo = new THREE.SphereGeometry(0.18, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+            const sode = new THREE.Mesh(sodeGeo, lacquerMat);
+            sode.scale.set(1.1, 0.6, 1.4);
+            sode.rotation.z = i * -0.3;
+            sode.position.set(i * 0.55, bodyY + 0.48, 0);
+            this.mesh.add(sode);
+
+            const edgeGeo = new THREE.TorusGeometry(0.17, 0.012, 6, 14);
+            const edge = new THREE.Mesh(edgeGeo, goldMat);
+            edge.scale.set(1.1, 1, 1.4);
+            edge.rotation.x = Math.PI / 2;
+            edge.rotation.z = i * -0.3;
+            edge.position.set(i * 0.55, bodyY + 0.48, 0);
+            this.mesh.add(edge);
+        }
+
+        // --- Kusazuri (skirt plates) ---
+        const skirtY = bodyY - 0.6 - 0.25;
+        // Front: 5 thin hanging strips fanned in arc
+        for (let i = -2; i <= 2; i++) {
+            const stripGeo = new THREE.CylinderGeometry(0.04, 0.05, 0.5, 6);
+            const strip = new THREE.Mesh(stripGeo, lacquerMat);
+            strip.position.set(i * 0.17, skirtY, 0.28);
+            strip.rotation.x = -0.12 + Math.abs(i) * 0.06;
+            strip.rotation.z = i * 0.04;
+            strip.scale.set(2.2, 1, 0.4);
+            this.mesh.add(strip);
+        }
+        // Back: curved partial cylinder
+        const backGeo = new THREE.CylinderGeometry(0.45, 0.5, 0.5, 10, 1, true, Math.PI * 0.2, Math.PI * 0.6);
+        const backPlate = new THREE.Mesh(backGeo, lacquerMat);
+        backPlate.position.set(0, skirtY, 0);
+        backPlate.rotation.y = Math.PI;
+        this.mesh.add(backPlate);
+
+        // Inner glow (dimmer for armor)
+        const innerGlow = new THREE.PointLight(this.baseColor, 0.3, 3);
+        innerGlow.position.y = bodyY;
+        this.mesh.add(innerGlow);
+        this.innerGlow = innerGlow;
+
+        // --- Kabuto (helmet head) ---
+        this.headRestY = bodyY + 0.72;
+        this.head = new THREE.Group();
+        this.head.position.set(0, this.headRestY, 0);
+        this.mesh.add(this.head);
+
+        // Dome (half sphere)
+        const domeGeo = new THREE.SphereGeometry(0.3, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+        const dome = new THREE.Mesh(domeGeo, armorMat);
+        dome.castShadow = true;
+        this.head.add(dome);
+
+        // Dome ridges — 8 thin cylinders radiating up
+        for (let r = 0; r < 8; r++) {
+            const angle = (r / 8) * Math.PI * 2;
+            const ridgeGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.3, 4);
+            const ridge = new THREE.Mesh(ridgeGeo, goldMat);
+            ridge.position.set(
+                Math.sin(angle) * 0.15,
+                0.12,
+                Math.cos(angle) * 0.15
+            );
+            ridge.rotation.x = Math.cos(angle) * 0.45;
+            ridge.rotation.z = -Math.sin(angle) * 0.45;
+            this.head.add(ridge);
+        }
+
+        // Shikoro (neck guard)
+        const shikoroGeo = new THREE.CylinderGeometry(0.35, 0.45, 0.15, 8, 1, true);
+        const shikoro = new THREE.Mesh(shikoroGeo, lacquerMat);
+        shikoro.position.set(0, -0.08, -0.05);
+        this.head.add(shikoro);
+
+        // Maedate (crest) — lathe blade profile
+        const crestProfile = [
+            new THREE.Vector2(0, 0),
+            new THREE.Vector2(0.07, 0.1),
+            new THREE.Vector2(0.04, 0.35),
+            new THREE.Vector2(0.015, 0.5),
+            new THREE.Vector2(0, 0.55)
+        ];
+        const crestGeo = new THREE.LatheGeometry(crestProfile, 2);
+        const crest = new THREE.Mesh(crestGeo, goldMat);
+        crest.position.set(0, 0.15, 0.08);
+        this.head.add(crest);
+
+        // Mabisashi (visor brim) — curved partial cylinder
+        const visorGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.04, 12, 1, true, -Math.PI * 0.45, Math.PI * 0.9);
+        const visor = new THREE.Mesh(visorGeo, armorMat);
+        visor.position.set(0, -0.02, 0.05);
+        visor.rotation.x = -0.15;
+        this.head.add(visor);
+
+        // --- Menpo (face mask) — curved jaw ---
+        const menpoGeo = new THREE.SphereGeometry(0.22, 10, 8, 0, Math.PI * 2, Math.PI * 0.35, Math.PI * 0.35);
+        const menpo = new THREE.Mesh(menpoGeo, faceMat);
+        menpo.position.set(0, 0.04, 0.08);
+        menpo.scale.set(1, 0.9, 0.85);
+        this.head.add(menpo);
+
+        // Eye slits (emissive glow — matches archetype)
+        const eyeSlitMat = new THREE.MeshStandardMaterial({
+            color: this.baseColor, emissive: this.baseColor, emissiveIntensity: 0.8
+        });
+        for (let i = -1; i <= 1; i += 2) {
+            const slitGeo = new THREE.BoxGeometry(0.12, 0.03, 0.05);
+            const slit = new THREE.Mesh(slitGeo, eyeSlitMat);
+            slit.position.set(i * 0.1, -0.08, 0.21);
+            this.head.add(slit);
+        }
+
+        this.pupils = null; // skip googly eye wobble
+
+        // Spring physics state
+        this.headSpringOffset = new THREE.Vector3();
+        this.headSpringVel = new THREE.Vector3();
     }
 
     createLimb(side, type) {
@@ -1895,7 +2104,7 @@ class Character {
         }
 
         // Slime jiggle — squash and stretch the pear body
-        if (this.slimeBody) {
+        if (this.slimeBody && this.slimeBodyBasePos) {
             const t = Date.now() * 0.001;
             const breathe = Math.sin(t * 2.5) * 0.04;
             const moveJiggle = Math.min(speed * 0.008, 0.06);
@@ -1907,7 +2116,7 @@ class Character {
         }
 
         // Googly eye wobble
-        if (this.pupils) {
+        if (this.pupils && this.pupils.length) {
             const t = Date.now() * 0.001;
             for (let i = 0; i < this.pupils.length; i++) {
                 const eye = this.pupils[i];
