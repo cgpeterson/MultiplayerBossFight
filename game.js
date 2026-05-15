@@ -81,7 +81,7 @@ const NetworkManager = {
             firebase.initializeApp(FIREBASE_CONFIG);
             db = firebase.database();
             localPlayerId = 'p_' + Math.random().toString(36).substr(2, 9);
-            console.log('Firebase initialized successfully, player ID:', localPlayerId);
+            
             return Promise.resolve();
         } catch (e) {
             console.error('Firebase init failed, running in offline mode:', e);
@@ -94,7 +94,7 @@ const NetworkManager = {
             console.warn('No database connection - playing offline');
             return { offline: true };
         }
-        console.log('Joining/creating session:', bossName);
+        
 
         sessionId = bossName.toLowerCase().replace(/[^a-z0-9]/g, '_');
         sessionRef = db.ref(`sessions/${sessionId}`);
@@ -173,7 +173,7 @@ const NetworkManager = {
     },
 
     onPlayerJoined(playerId, data) {
-        console.log('Player joined:', playerId, data.name);
+        
         const spawnAngle = Math.random() * Math.PI * 2;
         const spawnDist = 6 + Math.random() * 2;
         const spawnPos = new THREE.Vector3(
@@ -208,7 +208,7 @@ const NetworkManager = {
     onPlayerLeft(playerId) {
         const remote = remotePlayers[playerId];
         if (remote) {
-            console.log('Player left:', playerId);
+            
             if (remote.character && remote.character.mesh) {
                 scene.remove(remote.character.mesh);
             }
@@ -422,7 +422,7 @@ function scaleBossForPlayerCount() {
     boss.health = Math.floor(boss.maxHealth * healthRatio);
     boss.posture = Math.floor(boss.maxPosture * postureRatio);
 
-    console.log(`Boss scaled for ${playerCount} players: HP=${boss.maxHealth}, Posture=${boss.maxPosture}`);
+    
 }
 
 function selectBossTarget() {
@@ -1537,9 +1537,9 @@ function startGame() {
         clock.start();
 
         if (isHost) {
-            console.log('You are the HOST - controlling boss AI');
+            
         } else {
-            console.log('You joined as CLIENT - boss state synced from host');
+            
         }
     }).catch(err => {
         console.error('Failed to start game:', err);
