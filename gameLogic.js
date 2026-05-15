@@ -10,7 +10,7 @@
     } else {
         // Browser globals (root is window)
         root.GameLogic = factory();
-    }
+    }h
 }(typeof self !== 'undefined' ? self : this, function () {
 
     // ============================================
@@ -37,7 +37,7 @@
     // ============================================
 
     function calculateDamage(attackType, isTargetStunned = false) {
-        constWZbaseDamage = attackType === 'heavy' ? 40 : 15;
+                const baseDamage = attackType === 'heavy' ? 40 : 15;
         const basePosture = attackType === 'heavy' ? 60 : 25;
 
         const damageMultiplier = isTargetStunned ? 1.5 : 1.0;
